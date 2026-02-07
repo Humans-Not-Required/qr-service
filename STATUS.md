@@ -1,6 +1,6 @@
 # QR Service - Status
 
-## Current State: MVP Backend ✅ + Style Rendering ✅ + Tracked QR / Short URLs ✅
+## Current State: MVP Backend ✅ + Style Rendering ✅ + Tracked QR / Short URLs ✅ + OpenAPI Complete ✅
 
 The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generation, decoding, raw image serving, styled rendering, and tracked QR codes with scan analytics all work end-to-end. All clippy warnings resolved, all code formatted.
 
@@ -74,9 +74,9 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ### What's Next (Priority Order)
 
-1. **Update OpenAPI spec** — add tracked QR endpoints to openapi.json
-2. **Push CI workflow** — needs `workflow` scope on GitHub token, or manual push via web UI
-3. **Rate limiting** — per-key rate limit exists in schema but isn't enforced
+1. **Push CI workflow** — needs `workflow` scope on GitHub token, or manual push via web UI
+2. **Rate limiting** — per-key rate limit exists in schema but isn't enforced
+3. **README update** — update README to document tracked QR and style features
 4. **Frontend** — React dashboard for human users
 5. **PDF output format** — mentioned in README, not yet implemented
 6. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
@@ -87,7 +87,7 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 - CI workflow push blocked — GitHub token lacks `workflow` scope
 - Styles accepted but style column in DB is informational only (not used for re-rendering)
 - CORS wide open (all origins) — tighten for production
-- OpenAPI spec does NOT yet include tracked QR endpoints — update needed
+- OpenAPI spec is now complete (v0.2.0) — 14 paths, 18 schemas
 - BASE_URL defaults to `http://localhost:8000` — must be set in production for correct short URLs
 
 ### Architecture Notes
@@ -101,4 +101,4 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ---
 
-*Last updated: 2026-02-07 08:45 UTC — Session: tracked QR / short URL implementation*
+*Last updated: 2026-02-07 08:55 UTC — Session: OpenAPI spec update (tracked QR, API keys, templates)*
