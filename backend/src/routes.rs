@@ -85,6 +85,7 @@ pub fn generate_qr(
         fg_color,
         bg_color,
         error_correction: qr::parse_ec_level(&req.error_correction),
+        style: qr::QrStyle::parse(&req.style),
     };
 
     let (image_data, content_type) = match req.format.as_str() {
@@ -261,6 +262,7 @@ pub fn batch_generate(
             fg_color,
             bg_color,
             error_correction: qr::parse_ec_level(&item.error_correction),
+            style: qr::QrStyle::parse(&item.style),
         };
 
         let (image_data, content_type) = match item.format.as_str() {
@@ -433,11 +435,16 @@ pub fn generate_from_template(
     };
 
     // Generate the QR code
+    let style_str = body
+        .get("style")
+        .and_then(|v| v.as_str())
+        .unwrap_or("square");
     let options = qr::QrOptions {
         size: size.clamp(64, 4096),
         fg_color: [0, 0, 0, 255],
         bg_color: [255, 255, 255, 255],
         error_correction: qr::parse_ec_level("M"),
+        style: qr::QrStyle::parse(style_str),
     };
 
     let (image_data, content_type) = match format.as_str() {

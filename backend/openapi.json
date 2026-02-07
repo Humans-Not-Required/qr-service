@@ -419,6 +419,7 @@
           },
           "style": {
             "type": "string",
+            "description": "Module rendering style. 'square' = standard sharp modules, 'rounded' = modules with rounded corners (context-aware, only rounds exposed corners), 'dots' = circular modules",
             "enum": [
               "square",
               "rounded",

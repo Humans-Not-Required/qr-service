@@ -31,6 +31,7 @@ fn test_qr_png_generation() {
         fg_color: [0, 0, 0, 255],
         bg_color: [255, 255, 255, 255],
         error_correction: qrcode::EcLevel::M,
+        style: qr_service::qr::QrStyle::Square,
     };
 
     let result = qr_service::qr::generate_png("https://example.com", &options);
@@ -49,6 +50,7 @@ fn test_qr_svg_generation() {
         fg_color: [0, 0, 0, 255],
         bg_color: [255, 255, 255, 255],
         error_correction: qrcode::EcLevel::M,
+        style: qr_service::qr::QrStyle::Square,
     };
 
     let result = qr_service::qr::generate_svg("https://example.com", &options);
@@ -111,6 +113,7 @@ fn test_roundtrip_generate_decode() {
         fg_color: [0, 0, 0, 255],
         bg_color: [255, 255, 255, 255],
         error_correction: qrcode::EcLevel::H,
+        style: qr_service::qr::QrStyle::Square,
     };
 
     let png_data = qr_service::qr::generate_png(test_data, &options).unwrap();
@@ -135,7 +138,146 @@ fn test_error_correction_levels() {
             fg_color: [0, 0, 0, 255],
             bg_color: [255, 255, 255, 255],
             error_correction: ec,
+            style: qr_service::qr::QrStyle::Square,
         };
         assert!(qr_service::qr::generate_png("test", &options).is_ok());
     }
+}
+
+#[test]
+fn test_dots_style_png() {
+    let options = qr_service::qr::QrOptions {
+        size: 256,
+        fg_color: [0, 0, 0, 255],
+        bg_color: [255, 255, 255, 255],
+        error_correction: qrcode::EcLevel::M,
+        style: qr_service::qr::QrStyle::Dots,
+    };
+    let result = qr_service::qr::generate_png("https://example.com", &options);
+    assert!(result.is_ok());
+    let data = result.unwrap();
+    assert_eq!(&data[0..4], &[0x89, 0x50, 0x4E, 0x47]);
+}
+
+#[test]
+fn test_rounded_style_png() {
+    let options = qr_service::qr::QrOptions {
+        size: 256,
+        fg_color: [0, 0, 0, 255],
+        bg_color: [255, 255, 255, 255],
+        error_correction: qrcode::EcLevel::M,
+        style: qr_service::qr::QrStyle::Rounded,
+    };
+    let result = qr_service::qr::generate_png("https://example.com", &options);
+    assert!(result.is_ok());
+    let data = result.unwrap();
+    assert_eq!(&data[0..4], &[0x89, 0x50, 0x4E, 0x47]);
+}
+
+#[test]
+fn test_dots_style_svg() {
+    let options = qr_service::qr::QrOptions {
+        size: 256,
+        fg_color: [0, 0, 0, 255],
+        bg_color: [255, 255, 255, 255],
+        error_correction: qrcode::EcLevel::M,
+        style: qr_service::qr::QrStyle::Dots,
+    };
+    let svg = qr_service::qr::generate_svg("https://example.com", &options).unwrap();
+    assert!(
+        svg.contains("<circle"),
+        "Dots style SVG should use <circle> elements"
+    );
+    assert!(
+        !svg.contains("<rect x="),
+        "Dots style SVG should not use module <rect> elements (except background)"
+    );
+}
+
+#[test]
+fn test_rounded_style_svg() {
+    let options = qr_service::qr::QrOptions {
+        size: 256,
+        fg_color: [0, 0, 0, 255],
+        bg_color: [255, 255, 255, 255],
+        error_correction: qrcode::EcLevel::M,
+        style: qr_service::qr::QrStyle::Rounded,
+    };
+    let svg = qr_service::qr::generate_svg("https://example.com", &options).unwrap();
+    assert!(svg.contains("<svg"));
+    // Should have at least some <path> elements for rounded corners
+    assert!(
+        svg.contains("<path") || svg.contains("<rect"),
+        "Rounded style SVG should have path or rect elements"
+    );
+}
+
+#[test]
+fn test_dots_style_roundtrip() {
+    // Dots style should still be scannable at high resolution with high EC
+    let test_data = "DOTS_TEST";
+    let options = qr_service::qr::QrOptions {
+        size: 1024,
+        fg_color: [0, 0, 0, 255],
+        bg_color: [255, 255, 255, 255],
+        error_correction: qrcode::EcLevel::H,
+        style: qr_service::qr::QrStyle::Dots,
+    };
+    let png_data = qr_service::qr::generate_png(test_data, &options).unwrap();
+    let img = image::load_from_memory(&png_data).unwrap().to_luma8();
+    let mut prepared = rqrr::PreparedImage::prepare(img);
+    let grids = prepared.detect_grids();
+    assert!(
+        !grids.is_empty(),
+        "Dots style QR should still be detectable"
+    );
+    let (_meta, content) = grids.into_iter().next().unwrap().decode().unwrap();
+    assert_eq!(content, test_data);
+}
+
+#[test]
+fn test_rounded_style_roundtrip() {
+    // Rounded style should still be scannable
+    let test_data = "ROUNDED_TEST";
+    let options = qr_service::qr::QrOptions {
+        size: 512,
+        fg_color: [0, 0, 0, 255],
+        bg_color: [255, 255, 255, 255],
+        error_correction: qrcode::EcLevel::H,
+        style: qr_service::qr::QrStyle::Rounded,
+    };
+    let png_data = qr_service::qr::generate_png(test_data, &options).unwrap();
+    let img = image::load_from_memory(&png_data).unwrap().to_luma8();
+    let mut prepared = rqrr::PreparedImage::prepare(img);
+    let grids = prepared.detect_grids();
+    assert!(
+        !grids.is_empty(),
+        "Rounded style QR should still be detectable"
+    );
+    let (_meta, content) = grids.into_iter().next().unwrap().decode().unwrap();
+    assert_eq!(content, test_data);
+}
+
+#[test]
+fn test_style_from_str() {
+    assert_eq!(
+        qr_service::qr::QrStyle::parse("square"),
+        qr_service::qr::QrStyle::Square
+    );
+    assert_eq!(
+        qr_service::qr::QrStyle::parse("rounded"),
+        qr_service::qr::QrStyle::Rounded
+    );
+    assert_eq!(
+        qr_service::qr::QrStyle::parse("dots"),
+        qr_service::qr::QrStyle::Dots
+    );
+    assert_eq!(
+        qr_service::qr::QrStyle::parse("DOTS"),
+        qr_service::qr::QrStyle::Dots
+    );
+    assert_eq!(
+        qr_service::qr::QrStyle::parse("unknown"),
+        qr_service::qr::QrStyle::Square
+    );
 }
