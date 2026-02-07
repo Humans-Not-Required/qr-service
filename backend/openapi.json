@@ -1,0 +1,339 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "QR Service API",
+    "description": "Agent QR Code Service - Generate, customize, and decode QR codes",
+    "version": "0.1.0",
+    "contact": {
+      "name": "Humans-Not-Required",
+      "url": "https://github.com/Humans-Not-Required/qr-service"
+    },
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000/api/v1",
+      "description": "Local development"
+    }
+  ],
+  "security": [
+    {
+      "BearerAuth": []
+    },
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "operationId": "health",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "version": { "type": "string", "example": "0.1.0" },
+                    "uptime_seconds": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/qr/generate": {
+      "post": {
+        "summary": "Generate a QR code",
+        "operationId": "generateQr",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "QR code generated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QrResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/qr/decode": {
+      "post": {
+        "summary": "Decode a QR code from image",
+        "operationId": "decodeQr",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "QR code decoded successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecodeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/qr/batch": {
+      "post": {
+        "summary": "Batch generate QR codes",
+        "operationId": "batchGenerate",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["items"],
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "$ref": "#/components/schemas/GenerateRequest"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Batch generated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchQrResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/qr/template/{type}": {
+      "post": {
+        "summary": "Generate QR from template",
+        "operationId": "generateFromTemplate",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["wifi", "vcard", "url"]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Template QR generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QrResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/qr/history": {
+      "get": {
+        "summary": "List generated QR codes",
+        "operationId": "getHistory",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "per_page", "in": "query", "schema": { "type": "integer", "default": 20, "maximum": 100 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "QR code history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/qr/{id}": {
+      "get": {
+        "summary": "Get a specific QR code",
+        "operationId": "getQrById",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "QR code details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QrResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a QR code",
+        "operationId": "deleteQr",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "QR code deleted"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      }
+    },
+    "schemas": {
+      "GenerateRequest": {
+        "type": "object",
+        "required": ["data"],
+        "properties": {
+          "data": { "type": "string", "description": "Text/URL to encode in QR code" },
+          "format": { "type": "string", "enum": ["png", "svg"], "default": "png" },
+          "size": { "type": "integer", "minimum": 64, "maximum": 4096, "default": 256 },
+          "fg_color": { "type": "string", "default": "#000000", "description": "Foreground color (hex)" },
+          "bg_color": { "type": "string", "default": "#FFFFFF", "description": "Background color (hex)" },
+          "error_correction": { "type": "string", "enum": ["L", "M", "Q", "H"], "default": "M" },
+          "style": { "type": "string", "enum": ["square", "rounded", "dots"], "default": "square" }
+        }
+      },
+      "QrResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "data": { "type": "string" },
+          "format": { "type": "string" },
+          "size": { "type": "integer" },
+          "image_base64": { "type": "string", "description": "Base64-encoded image data URI" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "BatchQrResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/QrResponse" }
+          },
+          "total": { "type": "integer" }
+        }
+      },
+      "DecodeResponse": {
+        "type": "object",
+        "properties": {
+          "data": { "type": "string" },
+          "format": { "type": "string" }
+        }
+      },
+      "HistoryResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "data": { "type": "string" },
+                "format": { "type": "string" },
+                "size": { "type": "integer" },
+                "created_at": { "type": "string" }
+              }
+            }
+          },
+          "total": { "type": "integer" },
+          "page": { "type": "integer" },
+          "per_page": { "type": "integer" }
+        }
+      },
+      "ApiError": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" },
+          "code": { "type": "string" },
+          "status": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

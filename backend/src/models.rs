@@ -1,0 +1,169 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GenerateRequest {
+    pub data: String,
+    #[serde(default = "default_format")]
+    pub format: String,
+    #[serde(default = "default_size")]
+    pub size: u32,
+    #[serde(default = "default_fg_color")]
+    pub fg_color: String,
+    #[serde(default = "default_bg_color")]
+    pub bg_color: String,
+    #[serde(default = "default_error_correction")]
+    pub error_correction: String,
+    #[serde(default = "default_style")]
+    pub style: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchGenerateRequest {
+    pub items: Vec<GenerateRequest>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WifiTemplateRequest {
+    pub ssid: String,
+    pub password: String,
+    #[serde(default = "default_wifi_encryption")]
+    pub encryption: String,
+    #[serde(default)]
+    pub hidden: bool,
+    #[serde(default = "default_format")]
+    pub format: String,
+    #[serde(default = "default_size")]
+    pub size: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VCardTemplateRequest {
+    pub name: String,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub phone: Option<String>,
+    #[serde(default)]
+    pub org: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default = "default_format")]
+    pub format: String,
+    #[serde(default = "default_size")]
+    pub size: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UrlTemplateRequest {
+    pub url: String,
+    #[serde(default)]
+    pub utm_source: Option<String>,
+    #[serde(default)]
+    pub utm_medium: Option<String>,
+    #[serde(default)]
+    pub utm_campaign: Option<String>,
+    #[serde(default = "default_format")]
+    pub format: String,
+    #[serde(default = "default_size")]
+    pub size: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum TemplateRequest {
+    #[serde(rename = "wifi")]
+    Wifi(WifiTemplateRequest),
+    #[serde(rename = "vcard")]
+    VCard(VCardTemplateRequest),
+    #[serde(rename = "url")]
+    Url(UrlTemplateRequest),
+}
+
+#[derive(Debug, Serialize)]
+pub struct QrResponse {
+    pub id: String,
+    pub data: String,
+    pub format: String,
+    pub size: u32,
+    pub image_base64: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BatchQrResponse {
+    pub items: Vec<QrResponse>,
+    pub total: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DecodeResponse {
+    pub data: String,
+    pub format: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct QrHistoryItem {
+    pub id: String,
+    pub data: String,
+    pub format: String,
+    pub size: u32,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HistoryResponse {
+    pub items: Vec<QrHistoryItem>,
+    pub total: usize,
+    pub page: usize,
+    pub per_page: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HistoryParams {
+    pub page: Option<usize>,
+    pub per_page: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateKeyRequest {
+    pub name: String,
+    #[serde(default = "default_rate_limit")]
+    pub rate_limit: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct KeyResponse {
+    pub id: String,
+    pub name: String,
+    pub key: Option<String>, // Only returned on creation
+    pub created_at: String,
+    pub last_used_at: Option<String>,
+    pub requests_count: i64,
+    pub rate_limit: i64,
+    pub active: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApiError {
+    pub error: String,
+    pub code: String,
+    pub status: u16,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HealthResponse {
+    pub status: String,
+    pub version: String,
+    pub uptime_seconds: u64,
+}
+
+fn default_format() -> String { "png".to_string() }
+fn default_size() -> u32 { 256 }
+fn default_fg_color() -> String { "#000000".to_string() }
+fn default_bg_color() -> String { "#FFFFFF".to_string() }
+fn default_error_correction() -> String { "M".to_string() }
+fn default_style() -> String { "square".to_string() }
+fn default_wifi_encryption() -> String { "WPA2".to_string() }
+fn default_rate_limit() -> i64 { 100 }

@@ -1,0 +1,16 @@
+# Rust
+target/
+*.db
+
+# Frontend
+node_modules/
+dist/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

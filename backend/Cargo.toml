@@ -1,0 +1,21 @@
+[package]
+name = "qr-service"
+version = "0.1.0"
+edition = "2021"
+description = "Agent QR Code Service - Generate, customize, and decode QR codes via REST API"
+license = "MIT"
+
+[dependencies]
+rocket = { version = "0.5", features = ["json"] }
+rocket_cors = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }
+qrcode = "0.14"
+image = "0.25"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+base64 = "0.22"
+sha2 = "0.10"
+rand = "0.8"
+tokio = { version = "1", features = ["full"] }
