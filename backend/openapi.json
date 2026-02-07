@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "QR Service API",
-    "description": "Agent QR Code Service — Generate, customize, decode, and track QR codes via REST API. Supports styled rendering, batch generation, templates, tracked QR codes with short URL redirects and scan analytics. All authenticated endpoints enforce per-key rate limiting (default: 100 requests per 60-second window, configurable per key). Returns 429 Too Many Requests when exceeded.",
-    "version": "0.3.0",
+    "description": "Agent QR Code Service — Generate, customize, decode, and track QR codes via REST API. Supports styled rendering, batch generation, templates, tracked QR codes with short URL redirects and scan analytics. All authenticated endpoints enforce per-key rate limiting (default: 100 requests per 60-second window, configurable per key). Returns 429 Too Many Requests when exceeded. Every authenticated response includes `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers so clients can self-regulate.",
+    "version": "0.4.0",
     "contact": {
       "name": "Humans-Not-Required",
       "url": "https://github.com/Humans-Not-Required/qr-service"
@@ -818,6 +818,29 @@
     }
   },
   "components": {
+    "headers": {
+      "X-RateLimit-Limit": {
+        "description": "Maximum requests allowed in the current window",
+        "schema": {
+          "type": "integer",
+          "example": 100
+        }
+      },
+      "X-RateLimit-Remaining": {
+        "description": "Requests remaining in the current window",
+        "schema": {
+          "type": "integer",
+          "example": 97
+        }
+      },
+      "X-RateLimit-Reset": {
+        "description": "Seconds until the current rate limit window resets",
+        "schema": {
+          "type": "integer",
+          "example": 45
+        }
+      }
+    },
     "securitySchemes": {
       "BearerAuth": {
         "type": "http",

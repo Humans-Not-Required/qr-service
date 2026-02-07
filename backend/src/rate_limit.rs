@@ -2,6 +2,10 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use rocket::fairing::{Fairing, Info, Kind};
+use rocket::http::Header;
+use rocket::{Request, Response};
+
 /// Fixed-window rate limiter.
 ///
 /// Each API key gets a counter that resets every `window` duration.
@@ -14,7 +18,8 @@ pub struct RateLimiter {
 }
 
 /// Result of a rate limit check.
-#[allow(dead_code)]
+/// Stored in request-local state so the response fairing can attach headers.
+#[derive(Clone)]
 pub struct RateLimitResult {
     /// Whether the request is allowed.
     pub allowed: bool,
@@ -24,6 +29,31 @@ pub struct RateLimitResult {
     pub remaining: u64,
     /// Seconds until the current window resets.
     pub reset_secs: u64,
+}
+
+/// Rocket fairing that attaches rate limit headers to every response.
+/// Reads `RateLimitResult` from request-local state (set by the auth guard).
+pub struct RateLimitHeaders;
+
+#[rocket::async_trait]
+impl Fairing for RateLimitHeaders {
+    fn info(&self) -> Info {
+        Info {
+            name: "Rate Limit Response Headers",
+            kind: Kind::Response,
+        }
+    }
+
+    async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
+        if let Some(rl) = request.local_cache(|| Option::<RateLimitResult>::None) {
+            response.set_header(Header::new("X-RateLimit-Limit", rl.limit.to_string()));
+            response.set_header(Header::new(
+                "X-RateLimit-Remaining",
+                rl.remaining.to_string(),
+            ));
+            response.set_header(Header::new("X-RateLimit-Reset", rl.reset_secs.to_string()));
+        }
+    }
 }
 
 impl RateLimiter {

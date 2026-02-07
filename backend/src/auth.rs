@@ -79,6 +79,10 @@ impl<'r> FromRequest<'r> for AuthenticatedKey {
 
                 // Enforce rate limit (per-key, fixed window)
                 let result = limiter.check(&auth_key.id, rate_limit as u64);
+
+                // Store rate limit info in request-local state for response headers
+                let _ = request.local_cache(|| Some(result.clone()));
+
                 if !result.allowed {
                     return Outcome::Error((
                         Status::TooManyRequests,

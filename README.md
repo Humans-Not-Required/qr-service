@@ -49,6 +49,7 @@ Pre-built templates for common use cases:
 - **Per-key enforcement** — Each API key has a configurable request limit per time window
 - **Fixed-window algorithm** — In-memory, zero-overhead tracking (no extra DB writes)
 - **429 Too Many Requests** — Returned when a key exceeds its limit
+- **Response headers** — Every authenticated response includes `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` so clients can self-regulate
 - **Configurable window** — Default 60 seconds, set via `RATE_LIMIT_WINDOW_SECS`
 - **Per-key limits** — Admin-configurable via the `rate_limit` field (default: 100 req/min, admin: 10,000)
 
