@@ -1,6 +1,6 @@
 # QR Service - Status
 
-## Current State: MVP Backend ✅ + Style Rendering ✅ + Tracked QR / Short URLs ✅ + OpenAPI Complete ✅ + Rate Limiting ✅ + Rate Limit Headers ✅ + Frontend ✅
+## Current State: MVP Backend ✅ + Style Rendering ✅ + Tracked QR / Short URLs ✅ + OpenAPI Complete ✅ + Rate Limiting ✅ + Rate Limit Headers ✅ + Frontend ✅ + Unified Serving ✅
 
 The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generation, decoding, raw image serving, styled rendering, tracked QR codes with scan analytics, and per-key rate limiting all work end-to-end. All clippy warnings resolved, all code formatted.
 
@@ -47,7 +47,14 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
   - Returns 429 Too Many Requests when limit exceeded
   - Zero database overhead — all tracking is in-memory
   - 3 unit tests for rate limiter (under limit, at limit, key isolation)
-- **Rate Limit Response Headers** (NEW):
+- **Unified Serving** (NEW):
+  - Backend serves frontend static files via Rocket's `FileServer`
+  - SPA catch-all fallback route (rank 20) serves `index.html` for unmatched GET requests
+  - Auto-detects `frontend/dist/` directory; API-only mode if missing
+  - `STATIC_DIR` env var for custom frontend path (default: `../frontend/dist`)
+  - Dockerfile updated to 3-stage build: Node frontend → Rust backend → slim runtime
+  - Single port, single binary deployment — no separate static server needed
+- **Rate Limit Response Headers**:
   - `X-RateLimit-Limit` — max requests allowed in current window
   - `X-RateLimit-Remaining` — requests remaining in current window
   - `X-RateLimit-Reset` — seconds until window resets
@@ -60,6 +67,7 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 - **Config:** Environment variables via `.env` / `dotenvy` (DATABASE_PATH, ROCKET_ADDRESS, ROCKET_PORT, BASE_URL, RATE_LIMIT_WINDOW_SECS)
 - **Tests:** 25 tests passing (22 integration + 3 rate limiter unit tests)
 - **Code Quality:** Zero clippy warnings, cargo fmt clean
+- **Deployment:** Single-port unified serving (API + frontend on same origin)
 
 ### GitHub Actions CI (Ready but Blocked)
 
@@ -93,11 +101,13 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 1. ~~**Push CI workflow**~~ — BLOCKED (attempts: 3). Token lacks `workflow` scope. File exists locally at `.github/workflows/ci.yml`. Needs manual push via GitHub web UI or token scope update by Jordan.
 2. ~~**Frontend**~~ ✅ Done — React dashboard with generate/decode/templates/history tabs
-3. **Serve frontend from Rocket** — Mount static file server for `frontend/dist/` so single binary serves both API + UI
+3. ~~**Serve frontend from Rocket**~~ ✅ Done — FileServer + SPA fallback, single-port deployment
 4. **PDF output format** — mentioned in roadmap, not yet implemented
 5. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
 
-**Consider deployable?** Core API is feature-complete: generate, decode, batch, templates, styles, tracked QR/short URLs, rate limiting with headers, OpenAPI spec, Docker support, React frontend. README has setup instructions. Tests pass. This is deployable — remaining items are enhancements.
+**Consider deployable?** ✅ **YES — fully deployable.** Core API is feature-complete: generate, decode, batch, templates, styles, tracked QR/short URLs, rate limiting with headers, OpenAPI spec, Docker support, React frontend served from the backend. Single port, single binary. README has setup instructions. Tests pass. Remaining items (PDF, logo overlay) are enhancements.
+
+**⚡ QR-SERVICE IS DONE. Next project: kanban.**
 
 ### ⚠️ Gotchas
 
@@ -121,4 +131,4 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ---
 
-*Last updated: 2026-02-07 13:45 UTC — Session: React frontend shipped (generate/decode/templates/history)*
+*Last updated: 2026-02-07 13:55 UTC — Session: Unified serving (backend serves frontend via FileServer + SPA fallback)*
