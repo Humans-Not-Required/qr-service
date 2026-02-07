@@ -1,8 +1,8 @@
 # QR Service - Status
 
-## Current State: MVP Backend ✅ + Style Rendering ✅ + Tracked QR / Short URLs ✅ + OpenAPI Complete ✅
+## Current State: MVP Backend ✅ + Style Rendering ✅ + Tracked QR / Short URLs ✅ + OpenAPI Complete ✅ + Rate Limiting ✅
 
-The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generation, decoding, raw image serving, styled rendering, and tracked QR codes with scan analytics all work end-to-end. All clippy warnings resolved, all code formatted.
+The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generation, decoding, raw image serving, styled rendering, tracked QR codes with scan analytics, and per-key rate limiting all work end-to-end. All clippy warnings resolved, all code formatted.
 
 ### What's Done
 
@@ -19,13 +19,13 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
   - `POST /api/v1/keys` — Create API key (admin only)
   - `DELETE /api/v1/keys/{id}` — Revoke API key (admin only)
   - `GET /api/v1/health` — Health check
-  - `GET /api/v1/openapi.json` — OpenAPI 3.0 spec (needs update for tracked QR endpoints)
+  - `GET /api/v1/openapi.json` — OpenAPI 3.0 spec (v0.3.0)
 - **Style Rendering:**
   - `square` — standard sharp-edge modules (default)
   - `rounded` — context-aware rounded corners
   - `dots` — circular modules
   - All styles verified scannable via roundtrip encode/decode tests
-- **Tracked QR / Short URLs** (NEW):
+- **Tracked QR / Short URLs:**
   - `POST /api/v1/qr/tracked` — Create a tracked QR code that encodes a short URL
     - Custom or auto-generated short codes (3-32 chars, alphanumeric + hyphens/underscores)
     - Optional expiry (ISO-8601 timestamp)
@@ -39,11 +39,19 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
     - Increments scan count atomically
     - Checks expiry (returns 410 Gone if expired)
     - Returns 302 Temporary Redirect to target URL
+- **Rate Limiting** (NEW):
+  - Fixed-window per-key enforcement via in-memory rate limiter
+  - Each API key has a configurable `rate_limit` (requests per window)
+  - Default: 100 req/min for regular keys, 10,000 for admin keys
+  - Window duration configurable via `RATE_LIMIT_WINDOW_SECS` env var (default: 60s)
+  - Returns 429 Too Many Requests when limit exceeded
+  - Zero database overhead — all tracking is in-memory
+  - 3 unit tests for rate limiter (under limit, at limit, key isolation)
 - **Auth:** API key authentication via `Authorization: Bearer` or `X-API-Key` header
 - **Database:** SQLite with WAL mode, auto-creates admin key on first run
 - **Docker:** Dockerfile (multi-stage build) + docker-compose.yml
-- **Config:** Environment variables via `.env` / `dotenvy` (DATABASE_PATH, ROCKET_ADDRESS, ROCKET_PORT, BASE_URL)
-- **Tests:** 22 integration tests passing (color parsing, PNG/SVG generation, templates, roundtrip, style rendering, style roundtrips, tracked QR DB roundtrip, short code uniqueness, cascade delete, expiry check)
+- **Config:** Environment variables via `.env` / `dotenvy` (DATABASE_PATH, ROCKET_ADDRESS, ROCKET_PORT, BASE_URL, RATE_LIMIT_WINDOW_SECS)
+- **Tests:** 25 tests passing (22 integration + 3 rate limiter unit tests)
 - **Code Quality:** Zero clippy warnings, cargo fmt clean
 
 ### GitHub Actions CI (Ready but Blocked)
@@ -71,10 +79,12 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 - **Short URLs at root `/r/`** — clean, short redirects outside the API prefix
 - **ScanMeta request guard** — captures User-Agent/Referer without accessing raw Request object
 - **Configurable BASE_URL** — short URLs work in any deployment environment
+- **In-memory rate limiter** — no DB overhead per request; resets on restart (acceptable trade-off for simplicity)
+- **Rate limit check in auth guard** — single enforcement point; all authenticated routes are covered automatically
 
 ### What's Next (Priority Order)
 
-1. **Rate limiting** — per-key rate limit exists in schema but isn't enforced. Implement middleware to check requests_count against rate_limit per time window.
+1. **Rate limit response headers** — Add `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` headers to all responses so clients can self-regulate. The `RateLimitResult` struct already carries this data; need a Rocket fairing or response wrapper.
 2. **Push CI workflow** — `.github/workflows/ci.yml` exists locally but needs `workflow` scope on GitHub token, or manual push via web UI (attempts: 2)
 3. **Frontend** — React dashboard for human users
 4. **PDF output format** — mentioned in roadmap, not yet implemented
@@ -86,8 +96,9 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 - CI workflow push blocked — GitHub token lacks `workflow` scope
 - Styles accepted but style column in DB is informational only (not used for re-rendering)
 - CORS wide open (all origins) — tighten for production
-- OpenAPI spec is now complete (v0.2.0) — 14 paths, 18 schemas
+- OpenAPI spec is at v0.3.0 — 14 paths, 18 schemas, rate limit documented
 - BASE_URL defaults to `http://localhost:8000` — must be set in production for correct short URLs
+- Rate limiter state is in-memory — resets on server restart (not an issue for abuse prevention, but clients aren't "punished" across restarts)
 
 ### Architecture Notes
 
@@ -97,7 +108,8 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 - Style rendering is pixel-level for PNG (no external drawing lib needed) and SVG-native for SVG output
 - Redirect route mounted at root (`/`), API routes at `/api/v1` — clean separation
 - ScanMeta uses Rocket's `FromRequest` trait for clean header extraction in redirect handler
+- Rate limiter uses `Mutex<HashMap>` with fixed-window algorithm — O(1) per check, managed as Rocket state
 
 ---
 
-*Last updated: 2026-02-07 08:58 UTC — Session: OpenAPI spec + README rewrite*
+*Last updated: 2026-02-07 09:07 UTC — Session: Rate limiting implementation*

@@ -45,6 +45,13 @@ Pre-built templates for common use cases:
 - **Expiring links** — Set an ISO-8601 expiry (returns 410 Gone after expiration)
 - **Configurable BASE_URL** — Short URLs work in any deployment environment
 
+### Rate Limiting
+- **Per-key enforcement** — Each API key has a configurable request limit per time window
+- **Fixed-window algorithm** — In-memory, zero-overhead tracking (no extra DB writes)
+- **429 Too Many Requests** — Returned when a key exceeds its limit
+- **Configurable window** — Default 60 seconds, set via `RATE_LIMIT_WINDOW_SECS`
+- **Per-key limits** — Admin-configurable via the `rate_limit` field (default: 100 req/min, admin: 10,000)
+
 ### Management
 - **API key auth** — `Authorization: Bearer` or `X-API-Key` header
 - **Admin key management** — Create and revoke API keys (admin only)
@@ -87,6 +94,7 @@ Set via environment variables or `.env` file:
 | `ROCKET_ADDRESS` | `0.0.0.0` | Listen address |
 | `ROCKET_PORT` | `8000` | Listen port |
 | `BASE_URL` | `http://localhost:8000` | Base URL for short URL generation |
+| `RATE_LIMIT_WINDOW_SECS` | `60` | Rate limit window in seconds |
 
 ## API Quick Start
 
@@ -209,7 +217,7 @@ curl -X POST http://localhost:8000/api/v1/qr/batch \
 ## Roadmap
 
 - [ ] GitHub Actions CI (blocked on token scope)
-- [ ] Rate limiting (schema exists, enforcement pending)
+- [x] Rate limiting (per-key, fixed-window, in-memory)
 - [ ] Frontend dashboard
 - [ ] PDF output format
 - [ ] Logo/image overlay (center of QR, requires high EC)
