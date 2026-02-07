@@ -215,11 +215,43 @@ curl -X POST http://localhost:8000/api/v1/qr/batch \
 - Redirect routes at root (`/r/`), API routes at `/api/v1` — clean separation
 - CORS is wide open (all origins) — tighten for production
 
+## Frontend
+
+A React-based dashboard for human users. Provides a visual interface for all API features.
+
+### Running the Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+This starts a dev server at `http://localhost:3000` that proxies API requests to the backend at `http://localhost:8000`.
+
+### Building for Production
+
+```bash
+cd frontend
+npm run build
+```
+
+The built files are in `frontend/dist/`. Serve them with any static file server, or integrate with the Rocket backend via a file server mount.
+
+### Features
+
+- **Generate** — Create QR codes with custom format, style, size, colors, and error correction
+- **Decode** — Drag-and-drop or upload a QR code image to decode
+- **Templates** — Quick generation for WiFi networks, vCards, and URLs
+- **History** — Browse, download, and delete previously generated QR codes
+- **Rate limit display** — Real-time remaining request count in the header
+- **API key management** — Stored locally in the browser
+
 ## Roadmap
 
 - [ ] GitHub Actions CI (blocked on token scope)
 - [x] Rate limiting (per-key, fixed-window, in-memory)
-- [ ] Frontend dashboard
+- [x] Frontend dashboard
 - [ ] PDF output format
 - [ ] Logo/image overlay (center of QR, requires high EC)
 
