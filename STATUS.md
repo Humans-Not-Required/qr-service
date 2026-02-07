@@ -1,8 +1,8 @@
 # QR Service - Status
 
-## Current State: MVP Backend ✅
+## Current State: MVP Backend ✅ + Raw Image Endpoint ✅
 
-The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generation and decoding works end-to-end.
+The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generation, decoding, and raw image serving work end-to-end. All clippy warnings resolved, all code formatted.
 
 ### What's Done
 
@@ -12,19 +12,28 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
   - `POST /api/v1/qr/batch` — Batch generation (up to 50 items)
   - `POST /api/v1/qr/template/{type}` — WiFi, vCard, URL templates
   - `GET /api/v1/qr/history` — Paginated history per API key
-  - `GET /api/v1/qr/{id}` — Fetch specific QR code
+  - `GET /api/v1/qr/{id}` — Fetch specific QR code (base64 JSON)
+  - `GET /api/v1/qr/{id}/image` — **NEW** Raw image bytes (PNG/SVG) with proper Content-Type
   - `DELETE /api/v1/qr/{id}` — Delete QR code
   - `GET /api/v1/keys` — List API keys (admin only)
   - `POST /api/v1/keys` — Create API key (admin only)
   - `DELETE /api/v1/keys/{id}` — Revoke API key (admin only)
   - `GET /api/v1/health` — Health check
-  - `GET /api/v1/openapi.json` — OpenAPI 3.0 spec
+  - `GET /api/v1/openapi.json` — OpenAPI 3.0 spec (updated with /image endpoint)
 - **Auth:** API key authentication via `Authorization: Bearer` or `X-API-Key` header
 - **Database:** SQLite with WAL mode, auto-creates admin key on first run
 - **Docker:** Dockerfile (multi-stage build) + docker-compose.yml
 - **Config:** Environment variables via `.env` / `dotenvy` (DATABASE_PATH, ROCKET_ADDRESS, ROCKET_PORT)
 - **Tests:** 11 integration tests passing (color parsing, PNG/SVG generation, templates, roundtrip encode/decode)
-- **OpenAPI spec** included
+- **Code Quality:** Zero clippy warnings, cargo fmt clean
+- **OpenAPI spec** updated with all endpoints
+
+### GitHub Actions CI (Ready but Blocked)
+
+- `.github/workflows/ci.yml` exists locally but can't be pushed — OAuth token lacks `workflow` scope
+- Workflow includes: fmt check, clippy with -D warnings, test suite, release build, Docker build
+- **Action needed:** Either add `workflow` scope to token or push the file manually via GitHub web UI
+- File location: `.github/workflows/ci.yml`
 
 ### Tech Stack
 
@@ -37,18 +46,18 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 - **SQLite over Postgres** — simplicity for a self-hosted service, no external deps
 - **Base64 data URIs in JSON responses** — agents can embed directly, no secondary download
+- **Raw image endpoint** — `/qr/{id}/image` returns actual bytes for efficient downloads
 - **Admin key auto-generated** — printed to stdout on first run (save it!)
 - **No style rendering yet** — "rounded" and "dots" styles accepted but render as square
 
 ### What's Next (Priority Order)
 
-1. **GitHub Actions CI** — automated test + build on push
-2. **Raw image endpoint** — `GET /api/v1/qr/{id}/image` returning actual PNG/SVG (not base64 JSON)
-3. **Style rendering** — implement rounded corners and dot patterns
-4. **Tracked QR / short URLs** — the `tracked_qr` and `scan_events` tables exist but routes aren't implemented
-5. **Rate limiting** — per-key rate limit exists in schema but isn't enforced
-6. **Frontend** — React dashboard for human users
-7. **PDF output format** — mentioned in README, not yet implemented
+1. **Push CI workflow** — needs `workflow` scope on GitHub token, or manual push via web UI
+2. **Style rendering** — implement rounded corners and dot patterns
+3. **Tracked QR / short URLs** — the `tracked_qr` and `scan_events` tables exist but routes aren't implemented
+4. **Rate limiting** — per-key rate limit exists in schema but isn't enforced
+5. **Frontend** — React dashboard for human users
+6. **PDF output format** — mentioned in README, not yet implemented
 
 ### Architecture Notes
 
@@ -58,4 +67,4 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ---
 
-*Last updated: 2026-02-07 08:00 UTC — Session: initial assessment + QR decode implementation + Docker + tests*
+*Last updated: 2026-02-07 08:10 UTC — Session: raw image endpoint + CI workflow + clippy/fmt cleanup*
