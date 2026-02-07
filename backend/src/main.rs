@@ -12,6 +12,9 @@ use rocket_cors::{AllowedOrigins, CorsOptions};
 
 #[launch]
 fn rocket() -> _ {
+    // Load .env file if present (silently ignore if missing)
+    let _ = dotenvy::dotenv();
+
     let cors = CorsOptions::default()
         .allowed_origins(AllowedOrigins::all())
         .to_cors()

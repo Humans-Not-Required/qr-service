@@ -5,6 +5,14 @@ edition = "2021"
 description = "Agent QR Code Service - Generate, customize, and decode QR codes via REST API"
 license = "MIT"
 
+[lib]
+name = "qr_service"
+path = "src/lib.rs"
+
+[[bin]]
+name = "qr-service"
+path = "src/main.rs"
+
 [dependencies]
 rocket = { version = "0.5", features = ["json"] }
 rocket_cors = "0.6"
@@ -19,3 +27,12 @@ base64 = "0.22"
 sha2 = "0.10"
 rand = "0.8"
 tokio = { version = "1", features = ["full"] }
+rqrr = "0.8"
+dotenvy = "0.15"
+
+[dev-dependencies]
+qrcode = "0.14"
+rqrr = "0.8"
+image = "0.25"
+uuid = { version = "1", features = ["v4"] }
+rusqlite = { version = "0.31", features = ["bundled"] }

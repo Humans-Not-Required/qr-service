@@ -161,9 +161,9 @@ pub fn decode_qr(
     
     // Use a simple decoder approach
     // For production, we'd use a proper QR decoder like rqrr
-    let mut decoder = rqrr_decode(&gray);
+    let decoded = rqrr_decode(&gray);
     
-    match decoder {
+    match decoded {
         Some(content) => Ok(Json(DecodeResponse {
             data: content,
             format: "qr".to_string(),
@@ -176,9 +176,14 @@ pub fn decode_qr(
     }
 }
 
-// Simple QR decode placeholder - TODO: integrate rqrr crate
-fn rqrr_decode(_img: &image::GrayImage) -> Option<String> {
-    // TODO: Implement actual QR decoding with rqrr crate
+fn rqrr_decode(img: &image::GrayImage) -> Option<String> {
+    let mut prepared = rqrr::PreparedImage::prepare(img.clone());
+    let grids = prepared.detect_grids();
+    if let Some(grid) = grids.into_iter().next() {
+        if let Ok((_meta, content)) = grid.decode() {
+            return Some(content);
+        }
+    }
     None
 }
 

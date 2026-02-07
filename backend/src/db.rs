@@ -4,7 +4,8 @@ use std::sync::Mutex;
 pub type DbPool = Mutex<Connection>;
 
 pub fn init_db() -> Result<DbPool> {
-    let conn = Connection::open("qr_service.db")?;
+    let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "qr_service.db".to_string());
+    let conn = Connection::open(&db_path)?;
     
     conn.execute_batch("
         PRAGMA journal_mode=WAL;
