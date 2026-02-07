@@ -39,9 +39,14 @@ fn rocket() -> _ {
                 routes::get_qr_by_id,
                 routes::get_qr_image,
                 routes::delete_qr,
+                routes::create_tracked_qr,
+                routes::list_tracked_qr,
+                routes::get_tracked_qr_stats,
+                routes::delete_tracked_qr,
                 routes::list_keys,
                 routes::create_key,
                 routes::delete_key,
             ],
         )
+        .mount("/", routes![routes::redirect_short_url])
 }

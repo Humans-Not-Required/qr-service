@@ -1,6 +1,7 @@
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use rocket::http::{ContentType, Status};
+use rocket::response::Redirect;
 use rocket::serde::json::Json;
 use rocket::State;
 
@@ -666,6 +667,450 @@ pub fn delete_qr(
     }
 }
 
+// ============ Tracked QR / Short URLs ============
+
+/// Create a tracked QR code that wraps a short URL for scan analytics.
+#[post("/qr/tracked", format = "json", data = "<req>")]
+pub fn create_tracked_qr(
+    req: Json<CreateTrackedQrRequest>,
+    key: AuthenticatedKey,
+    db: &State<DbPool>,
+) -> Result<Json<TrackedQrResponse>, (Status, Json<ApiError>)> {
+    let req = req.into_inner();
+
+    if req.target_url.is_empty() {
+        return Err((
+            Status::BadRequest,
+            Json(ApiError {
+                error: "target_url cannot be empty".to_string(),
+                code: "EMPTY_TARGET_URL".to_string(),
+                status: 400,
+            }),
+        ));
+    }
+
+    // Validate URL format (basic check)
+    if !req.target_url.starts_with("http://") && !req.target_url.starts_with("https://") {
+        return Err((
+            Status::BadRequest,
+            Json(ApiError {
+                error: "target_url must start with http:// or https://".to_string(),
+                code: "INVALID_URL".to_string(),
+                status: 400,
+            }),
+        ));
+    }
+
+    // Generate or validate short code
+    let short_code = match req.short_code {
+        Some(ref code) => {
+            if code.len() < 3 || code.len() > 32 {
+                return Err((
+                    Status::BadRequest,
+                    Json(ApiError {
+                        error: "short_code must be 3-32 characters".to_string(),
+                        code: "INVALID_SHORT_CODE".to_string(),
+                        status: 400,
+                    }),
+                ));
+            }
+            if !code
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+            {
+                return Err((
+                    Status::BadRequest,
+                    Json(ApiError {
+                        error: "short_code must be alphanumeric, hyphens, or underscores"
+                            .to_string(),
+                        code: "INVALID_SHORT_CODE".to_string(),
+                        status: 400,
+                    }),
+                ));
+            }
+            code.clone()
+        }
+        None => {
+            // Generate a random 8-char code
+            let id = uuid::Uuid::new_v4().to_string().replace("-", "");
+            id[..8].to_string()
+        }
+    };
+
+    // Check uniqueness
+    {
+        let conn = db.lock().unwrap();
+        let exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM tracked_qr WHERE short_code = ?1",
+                rusqlite::params![short_code],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            return Err((
+                Status::Conflict,
+                Json(ApiError {
+                    error: format!("Short code '{}' is already taken", short_code),
+                    code: "SHORT_CODE_TAKEN".to_string(),
+                    status: 409,
+                }),
+            ));
+        }
+    }
+
+    // Build the short URL that the QR code will encode.
+    // The service itself serves the redirect at /r/<short_code>.
+    // In production, ROCKET_ADDRESS + ROCKET_PORT determine the base URL.
+    // We use a configurable base or fall back to a sensible default.
+    let base_url =
+        std::env::var("BASE_URL").unwrap_or_else(|_| "http://localhost:8000".to_string());
+    let short_url = format!("{}/r/{}", base_url.trim_end_matches('/'), short_code);
+
+    // Generate the QR code encoding the short URL
+    let fg_color = qr::parse_hex_color(&req.fg_color).map_err(|e| {
+        (
+            Status::BadRequest,
+            Json(ApiError {
+                error: e,
+                code: "INVALID_FG_COLOR".to_string(),
+                status: 400,
+            }),
+        )
+    })?;
+    let bg_color = qr::parse_hex_color(&req.bg_color).map_err(|e| {
+        (
+            Status::BadRequest,
+            Json(ApiError {
+                error: e,
+                code: "INVALID_BG_COLOR".to_string(),
+                status: 400,
+            }),
+        )
+    })?;
+
+    let options = qr::QrOptions {
+        size: req.size.clamp(64, 4096),
+        fg_color,
+        bg_color,
+        error_correction: qr::parse_ec_level(&req.error_correction),
+        style: qr::QrStyle::parse(&req.style),
+    };
+
+    let (image_data, content_type) = match req.format.as_str() {
+        "svg" => {
+            let svg = qr::generate_svg(&short_url, &options).map_err(|e| {
+                (
+                    Status::InternalServerError,
+                    Json(ApiError {
+                        error: e,
+                        code: "GENERATION_FAILED".to_string(),
+                        status: 500,
+                    }),
+                )
+            })?;
+            (svg.into_bytes(), "image/svg+xml")
+        }
+        _ => {
+            let png = qr::generate_png(&short_url, &options).map_err(|e| {
+                (
+                    Status::InternalServerError,
+                    Json(ApiError {
+                        error: e,
+                        code: "GENERATION_FAILED".to_string(),
+                        status: 500,
+                    }),
+                )
+            })?;
+            (png, "image/png")
+        }
+    };
+
+    let qr_id = uuid::Uuid::new_v4().to_string();
+    let tracked_id = uuid::Uuid::new_v4().to_string();
+    let image_base64 = format!(
+        "data:{};base64,{}",
+        content_type,
+        BASE64.encode(&image_data)
+    );
+
+    let conn = db.lock().unwrap();
+
+    // Insert QR code record
+    conn.execute(
+        "INSERT INTO qr_codes (id, api_key_id, data, format, size, fg_color, bg_color, error_correction, style, image_data) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![
+            qr_id,
+            key.id,
+            short_url,
+            req.format,
+            req.size,
+            req.fg_color,
+            req.bg_color,
+            req.error_correction,
+            req.style,
+            image_data,
+        ],
+    ).map_err(|e| {
+        (
+            Status::InternalServerError,
+            Json(ApiError {
+                error: format!("Failed to store QR code: {}", e),
+                code: "DB_ERROR".to_string(),
+                status: 500,
+            }),
+        )
+    })?;
+
+    // Insert tracked QR record
+    conn.execute(
+        "INSERT INTO tracked_qr (id, qr_id, short_code, target_url, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![tracked_id, qr_id, short_code, req.target_url, req.expires_at],
+    ).map_err(|e| {
+        (
+            Status::InternalServerError,
+            Json(ApiError {
+                error: format!("Failed to create tracked QR: {}", e),
+                code: "DB_ERROR".to_string(),
+                status: 500,
+            }),
+        )
+    })?;
+
+    let created_at = conn
+        .query_row(
+            "SELECT created_at FROM tracked_qr WHERE id = ?1",
+            rusqlite::params![tracked_id],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap_or_else(|_| chrono::Utc::now().to_rfc3339());
+
+    Ok(Json(TrackedQrResponse {
+        id: tracked_id,
+        qr_id: qr_id.clone(),
+        short_code: short_code.clone(),
+        short_url: short_url.clone(),
+        target_url: req.target_url,
+        scan_count: 0,
+        expires_at: req.expires_at,
+        created_at: created_at.clone(),
+        qr: QrResponse {
+            id: qr_id,
+            data: short_url,
+            format: req.format,
+            size: req.size,
+            image_base64,
+            created_at,
+        },
+    }))
+}
+
+/// List all tracked QR codes for the authenticated user.
+#[get("/qr/tracked?<page>&<per_page>")]
+pub fn list_tracked_qr(
+    page: Option<usize>,
+    per_page: Option<usize>,
+    key: AuthenticatedKey,
+    db: &State<DbPool>,
+) -> Result<Json<TrackedQrListResponse>, (Status, Json<ApiError>)> {
+    let page = page.unwrap_or(1).max(1);
+    let per_page = per_page.unwrap_or(20).clamp(1, 100);
+    let offset = (page - 1) * per_page;
+
+    let conn = db.lock().unwrap();
+
+    let total: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM tracked_qr t JOIN qr_codes q ON t.qr_id = q.id WHERE q.api_key_id = ?1",
+            rusqlite::params![key.id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT t.id, t.short_code, t.target_url, t.scan_count, t.expires_at, t.created_at 
+         FROM tracked_qr t JOIN qr_codes q ON t.qr_id = q.id 
+         WHERE q.api_key_id = ?1 
+         ORDER BY t.created_at DESC LIMIT ?2 OFFSET ?3",
+        )
+        .map_err(|e| {
+            (
+                Status::InternalServerError,
+                Json(ApiError {
+                    error: format!("Database error: {}", e),
+                    code: "DB_ERROR".to_string(),
+                    status: 500,
+                }),
+            )
+        })?;
+
+    let items = stmt
+        .query_map(
+            rusqlite::params![key.id, per_page as i64, offset as i64],
+            |row| {
+                Ok(TrackedQrListItem {
+                    id: row.get(0)?,
+                    short_code: row.get(1)?,
+                    target_url: row.get(2)?,
+                    scan_count: row.get(3)?,
+                    expires_at: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            },
+        )
+        .map_err(|e| {
+            (
+                Status::InternalServerError,
+                Json(ApiError {
+                    error: format!("Query error: {}", e),
+                    code: "DB_ERROR".to_string(),
+                    status: 500,
+                }),
+            )
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(Json(TrackedQrListResponse { items, total }))
+}
+
+/// Get scan analytics for a tracked QR code.
+#[get("/qr/tracked/<id>/stats")]
+pub fn get_tracked_qr_stats(
+    id: &str,
+    key: AuthenticatedKey,
+    db: &State<DbPool>,
+) -> Result<Json<TrackedQrStatsResponse>, (Status, Json<ApiError>)> {
+    let conn = db.lock().unwrap();
+
+    // Verify ownership via the linked qr_codes record
+    let tracked = conn
+        .query_row(
+            "SELECT t.id, t.short_code, t.target_url, t.scan_count, t.expires_at, t.created_at 
+         FROM tracked_qr t JOIN qr_codes q ON t.qr_id = q.id 
+         WHERE t.id = ?1 AND q.api_key_id = ?2",
+            rusqlite::params![id, key.id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
+        )
+        .map_err(|_| {
+            (
+                Status::NotFound,
+                Json(ApiError {
+                    error: "Tracked QR code not found".to_string(),
+                    code: "NOT_FOUND".to_string(),
+                    status: 404,
+                }),
+            )
+        })?;
+
+    // Get recent scan events (last 100)
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, scanned_at, user_agent, referrer FROM scan_events 
+         WHERE tracked_qr_id = ?1 ORDER BY scanned_at DESC LIMIT 100",
+        )
+        .map_err(|e| {
+            (
+                Status::InternalServerError,
+                Json(ApiError {
+                    error: format!("Database error: {}", e),
+                    code: "DB_ERROR".to_string(),
+                    status: 500,
+                }),
+            )
+        })?;
+
+    let recent_scans = stmt
+        .query_map(rusqlite::params![id], |row| {
+            Ok(ScanEventResponse {
+                id: row.get(0)?,
+                scanned_at: row.get(1)?,
+                user_agent: row.get(2)?,
+                referrer: row.get(3)?,
+            })
+        })
+        .map_err(|e| {
+            (
+                Status::InternalServerError,
+                Json(ApiError {
+                    error: format!("Query error: {}", e),
+                    code: "DB_ERROR".to_string(),
+                    status: 500,
+                }),
+            )
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(Json(TrackedQrStatsResponse {
+        id: tracked.0,
+        short_code: tracked.1,
+        target_url: tracked.2,
+        scan_count: tracked.3,
+        expires_at: tracked.4,
+        created_at: tracked.5,
+        recent_scans,
+    }))
+}
+
+/// Delete a tracked QR code (and its scan events).
+#[delete("/qr/tracked/<id>")]
+pub fn delete_tracked_qr(
+    id: &str,
+    key: AuthenticatedKey,
+    db: &State<DbPool>,
+) -> Result<Json<serde_json::Value>, (Status, Json<ApiError>)> {
+    let conn = db.lock().unwrap();
+
+    // Verify ownership
+    let qr_id: String = conn.query_row(
+        "SELECT t.qr_id FROM tracked_qr t JOIN qr_codes q ON t.qr_id = q.id WHERE t.id = ?1 AND q.api_key_id = ?2",
+        rusqlite::params![id, key.id],
+        |row| row.get(0),
+    ).map_err(|_| {
+        (Status::NotFound, Json(ApiError {
+            error: "Tracked QR code not found".to_string(),
+            code: "NOT_FOUND".to_string(),
+            status: 404,
+        }))
+    })?;
+
+    // Delete scan events first (FK constraint)
+    conn.execute(
+        "DELETE FROM scan_events WHERE tracked_qr_id = ?1",
+        rusqlite::params![id],
+    )
+    .unwrap_or(0);
+
+    // Delete tracked record
+    conn.execute(
+        "DELETE FROM tracked_qr WHERE id = ?1",
+        rusqlite::params![id],
+    )
+    .unwrap_or(0);
+
+    // Also delete the underlying QR code
+    conn.execute(
+        "DELETE FROM qr_codes WHERE id = ?1",
+        rusqlite::params![qr_id],
+    )
+    .unwrap_or(0);
+
+    Ok(Json(serde_json::json!({"deleted": true, "id": id})))
+}
+
 // ============ API Keys ============
 
 #[get("/keys")]
@@ -810,5 +1255,99 @@ pub fn delete_key(
                 status: 404,
             }),
         ))
+    }
+}
+
+// ============ Short URL Redirect (mounted at root, not /api/v1) ============
+
+/// Captures optional scan metadata from request headers.
+pub struct ScanMeta {
+    pub user_agent: Option<String>,
+    pub referrer: Option<String>,
+}
+
+#[rocket::async_trait]
+impl<'r> rocket::request::FromRequest<'r> for ScanMeta {
+    type Error = std::convert::Infallible;
+
+    async fn from_request(
+        request: &'r rocket::Request<'_>,
+    ) -> rocket::request::Outcome<Self, Self::Error> {
+        let user_agent = request
+            .headers()
+            .get_one("User-Agent")
+            .map(|s| s.to_string());
+        let referrer = request.headers().get_one("Referer").map(|s| s.to_string());
+        rocket::request::Outcome::Success(ScanMeta {
+            user_agent,
+            referrer,
+        })
+    }
+}
+
+/// Redirect handler for tracked QR short URLs.
+/// When someone scans a tracked QR code, they hit /r/<code> which redirects
+/// to the target URL while recording the scan event.
+#[get("/r/<code>")]
+pub fn redirect_short_url(
+    code: &str,
+    db: &State<DbPool>,
+    meta: ScanMeta,
+) -> Result<Redirect, (Status, Json<ApiError>)> {
+    let conn = db.lock().unwrap();
+
+    // Look up the tracked QR by short code
+    let result = conn.query_row(
+        "SELECT id, target_url, expires_at FROM tracked_qr WHERE short_code = ?1",
+        rusqlite::params![code],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        },
+    );
+
+    match result {
+        Ok((tracked_id, target_url, expires_at)) => {
+            // Check expiry
+            if let Some(ref exp) = expires_at {
+                let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                if now > *exp {
+                    return Err((
+                        Status::Gone,
+                        Json(ApiError {
+                            error: "This short URL has expired".to_string(),
+                            code: "EXPIRED".to_string(),
+                            status: 410,
+                        }),
+                    ));
+                }
+            }
+
+            // Record scan event
+            let scan_id = uuid::Uuid::new_v4().to_string();
+            let _ = conn.execute(
+                "INSERT INTO scan_events (id, tracked_qr_id, user_agent, referrer) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![scan_id, tracked_id, meta.user_agent, meta.referrer],
+            );
+
+            // Increment scan count
+            let _ = conn.execute(
+                "UPDATE tracked_qr SET scan_count = scan_count + 1 WHERE id = ?1",
+                rusqlite::params![tracked_id],
+            );
+
+            Ok(Redirect::temporary(target_url))
+        }
+        Err(_) => Err((
+            Status::NotFound,
+            Json(ApiError {
+                error: "Short URL not found".to_string(),
+                code: "NOT_FOUND".to_string(),
+                status: 404,
+            }),
+        )),
     }
 }

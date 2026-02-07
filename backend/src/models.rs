@@ -190,3 +190,74 @@ fn default_wifi_encryption() -> String {
 fn default_rate_limit() -> i64 {
     100
 }
+
+// ============ Tracked QR / Short URLs ============
+
+#[derive(Debug, Deserialize)]
+pub struct CreateTrackedQrRequest {
+    pub target_url: String,
+    #[serde(default = "default_format")]
+    pub format: String,
+    #[serde(default = "default_size")]
+    pub size: u32,
+    #[serde(default = "default_fg_color")]
+    pub fg_color: String,
+    #[serde(default = "default_bg_color")]
+    pub bg_color: String,
+    #[serde(default = "default_error_correction")]
+    pub error_correction: String,
+    #[serde(default = "default_style")]
+    pub style: String,
+    /// Optional custom short code (auto-generated if omitted)
+    pub short_code: Option<String>,
+    /// Optional expiry as ISO-8601 timestamp
+    pub expires_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrackedQrResponse {
+    pub id: String,
+    pub qr_id: String,
+    pub short_code: String,
+    pub short_url: String,
+    pub target_url: String,
+    pub scan_count: i64,
+    pub expires_at: Option<String>,
+    pub created_at: String,
+    pub qr: QrResponse,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScanEventResponse {
+    pub id: String,
+    pub scanned_at: String,
+    pub user_agent: Option<String>,
+    pub referrer: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrackedQrStatsResponse {
+    pub id: String,
+    pub short_code: String,
+    pub target_url: String,
+    pub scan_count: i64,
+    pub expires_at: Option<String>,
+    pub created_at: String,
+    pub recent_scans: Vec<ScanEventResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrackedQrListItem {
+    pub id: String,
+    pub short_code: String,
+    pub target_url: String,
+    pub scan_count: i64,
+    pub expires_at: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrackedQrListResponse {
+    pub items: Vec<TrackedQrListItem>,
+    pub total: usize,
+}
