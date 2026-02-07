@@ -1,11 +1,12 @@
+use crate::db::{hash_key, DbPool};
 use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
 use rocket::State;
-use crate::db::{DbPool, hash_key};
 
 #[derive(Debug)]
 pub struct AuthenticatedKey {
     pub id: String,
+    #[allow(dead_code)]
     pub name: String,
     pub is_admin: bool,
 }
@@ -26,21 +27,27 @@ impl<'r> FromRequest<'r> for AuthenticatedKey {
                 if let Some(key) = auth.strip_prefix("Bearer ") {
                     key.to_string()
                 } else {
-                    return Outcome::Error((Status::Unauthorized, "Invalid authorization format. Use: Bearer YOUR_API_KEY"));
+                    return Outcome::Error((
+                        Status::Unauthorized,
+                        "Invalid authorization format. Use: Bearer YOUR_API_KEY",
+                    ));
                 }
             }
             None => {
                 // Also check X-API-Key header
                 match request.headers().get_one("X-API-Key") {
                     Some(key) => key.to_string(),
-                    None => return Outcome::Error((Status::Unauthorized, "Missing API key. Use Authorization: Bearer YOUR_KEY or X-API-Key header")),
+                    None => return Outcome::Error((
+                        Status::Unauthorized,
+                        "Missing API key. Use Authorization: Bearer YOUR_KEY or X-API-Key header",
+                    )),
                 }
             }
         };
 
         let key_hash = hash_key(&key);
         let conn = db.lock().unwrap();
-        
+
         match conn.query_row(
             "SELECT id, name, is_admin FROM api_keys WHERE key_hash = ?1 AND active = 1",
             rusqlite::params![key_hash],

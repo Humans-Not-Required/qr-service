@@ -1,11 +1,11 @@
 #[macro_use]
 extern crate rocket;
 
+mod auth;
 mod db;
 mod models;
-mod routes;
-mod auth;
 mod qr;
+mod routes;
 
 use rocket::fairing::AdHoc;
 use rocket_cors::{AllowedOrigins, CorsOptions};
@@ -26,18 +26,22 @@ fn rocket() -> _ {
             let db = db::init_db().expect("Failed to initialize database");
             rocket.manage(db)
         }))
-        .mount("/api/v1", routes![
-            routes::health,
-            routes::openapi,
-            routes::generate_qr,
-            routes::decode_qr,
-            routes::batch_generate,
-            routes::generate_from_template,
-            routes::get_history,
-            routes::get_qr_by_id,
-            routes::delete_qr,
-            routes::list_keys,
-            routes::create_key,
-            routes::delete_key,
-        ])
+        .mount(
+            "/api/v1",
+            routes![
+                routes::health,
+                routes::openapi,
+                routes::generate_qr,
+                routes::decode_qr,
+                routes::batch_generate,
+                routes::generate_from_template,
+                routes::get_history,
+                routes::get_qr_by_id,
+                routes::get_qr_image,
+                routes::delete_qr,
+                routes::list_keys,
+                routes::create_key,
+                routes::delete_key,
+            ],
+        )
 }

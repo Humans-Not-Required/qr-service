@@ -6,8 +6,9 @@ pub type DbPool = Mutex<Connection>;
 pub fn init_db() -> Result<DbPool> {
     let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "qr_service.db".to_string());
     let conn = Connection::open(&db_path)?;
-    
-    conn.execute_batch("
+
+    conn.execute_batch(
+        "
         PRAGMA journal_mode=WAL;
         PRAGMA foreign_keys=ON;
         
@@ -63,15 +64,16 @@ pub fn init_db() -> Result<DbPool> {
         CREATE INDEX IF NOT EXISTS idx_qr_codes_created ON qr_codes(created_at);
         CREATE INDEX IF NOT EXISTS idx_tracked_qr_short_code ON tracked_qr(short_code);
         CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
-    ")?;
-    
+    ",
+    )?;
+
     // Create default admin key if none exists
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM api_keys WHERE is_admin = 1",
         [],
         |row| row.get(0),
     )?;
-    
+
     if count == 0 {
         let admin_key = format!("qrs_{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
         let key_hash = hash_key(&admin_key);
@@ -89,12 +91,12 @@ pub fn init_db() -> Result<DbPool> {
         println!("  Save this key! It won't be shown again.");
         println!("===========================================");
     }
-    
+
     Ok(Mutex::new(conn))
 }
 
 pub fn hash_key(key: &str) -> String {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(key.as_bytes());
     format!("{:x}", hasher.finalize())

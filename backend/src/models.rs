@@ -22,6 +22,8 @@ pub struct BatchGenerateRequest {
     pub items: Vec<GenerateRequest>,
 }
 
+// Typed template structs — kept for future migration from serde_json::Value
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WifiTemplateRequest {
     pub ssid: String,
@@ -36,6 +38,7 @@ pub struct WifiTemplateRequest {
     pub size: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VCardTemplateRequest {
     pub name: String,
@@ -55,6 +58,7 @@ pub struct VCardTemplateRequest {
     pub size: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UrlTemplateRequest {
     pub url: String,
@@ -70,6 +74,7 @@ pub struct UrlTemplateRequest {
     pub size: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum TemplateRequest {
@@ -120,6 +125,7 @@ pub struct HistoryResponse {
     pub per_page: usize,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct HistoryParams {
     pub page: Option<usize>,
@@ -159,11 +165,28 @@ pub struct HealthResponse {
     pub uptime_seconds: u64,
 }
 
-fn default_format() -> String { "png".to_string() }
-fn default_size() -> u32 { 256 }
-fn default_fg_color() -> String { "#000000".to_string() }
-fn default_bg_color() -> String { "#FFFFFF".to_string() }
-fn default_error_correction() -> String { "M".to_string() }
-fn default_style() -> String { "square".to_string() }
-fn default_wifi_encryption() -> String { "WPA2".to_string() }
-fn default_rate_limit() -> i64 { 100 }
+fn default_format() -> String {
+    "png".to_string()
+}
+fn default_size() -> u32 {
+    256
+}
+fn default_fg_color() -> String {
+    "#000000".to_string()
+}
+fn default_bg_color() -> String {
+    "#FFFFFF".to_string()
+}
+fn default_error_correction() -> String {
+    "M".to_string()
+}
+fn default_style() -> String {
+    "square".to_string()
+}
+#[allow(dead_code)]
+fn default_wifi_encryption() -> String {
+    "WPA2".to_string()
+}
+fn default_rate_limit() -> i64 {
+    100
+}

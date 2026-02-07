@@ -1,32 +1,4 @@
-#[macro_use]
-extern crate rocket;
-
-use rocket::http::{ContentType, Header, Status};
-use rocket::local::blocking::Client;
-
-// Helper to build a test client
-fn test_client() -> (Client, String) {
-    // Use temp database
-    let db_path = format!("/tmp/qr_test_{}.db", uuid::Uuid::new_v4());
-    std::env::set_var("DATABASE_PATH", &db_path);
-
-    let rocket = rocket::build()
-        .attach(rocket::fairing::AdHoc::on_ignite("Database", |rocket| async {
-            let db = qr_service::db::init_db().expect("Failed to init db");
-            rocket.manage(db)
-        }))
-        .mount("/api/v1", routes![
-            qr_service::routes::health,
-        ]);
-
-    // We need the admin key that was printed at startup
-    // For testing, we'll just query it from the db
-    let conn = rusqlite::Connection::open(&db_path).unwrap();
-    let _count: i64 = conn.query_row("SELECT COUNT(*) FROM api_keys", [], |row| row.get(0)).unwrap();
-
-    let client = Client::tracked(rocket).expect("valid rocket instance");
-    (client, db_path)
-}
+// Unit tests for QR service core functionality
 
 #[test]
 fn test_health_endpoint() {
@@ -108,7 +80,14 @@ fn test_wifi_template_escaping() {
 
 #[test]
 fn test_vcard_generation() {
-    let data = qr_service::qr::vcard_data("John Doe", Some("john@example.com"), Some("+1234567890"), None, None, None);
+    let data = qr_service::qr::vcard_data(
+        "John Doe",
+        Some("john@example.com"),
+        Some("+1234567890"),
+        None,
+        None,
+        None,
+    );
     assert!(data.contains("BEGIN:VCARD"));
     assert!(data.contains("FN:John Doe"));
     assert!(data.contains("EMAIL:john@example.com"));
