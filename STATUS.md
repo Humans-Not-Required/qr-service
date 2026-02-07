@@ -91,7 +91,7 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ### What's Next (Priority Order)
 
-1. **Push CI workflow** — `.github/workflows/ci.yml` exists locally but needs `workflow` scope on GitHub token, or manual push via web UI (attempts: 2)
+1. ~~**Push CI workflow**~~ — BLOCKED (attempts: 3). Token lacks `workflow` scope. File exists locally at `.github/workflows/ci.yml`. Needs manual push via GitHub web UI or token scope update by Jordan.
 2. **Frontend** — React dashboard for human users
 3. **PDF output format** — mentioned in roadmap, not yet implemented
 4. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
@@ -120,4 +120,4 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ---
 
-*Last updated: 2026-02-07 09:17 UTC — Session: Rate limit response headers*
+*Last updated: 2026-02-07 11:41 UTC — Session: CI push blocked (3 attempts), moving to kanban*
