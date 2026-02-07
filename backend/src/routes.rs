@@ -4,6 +4,7 @@ use rocket::http::{ContentType, Status};
 use rocket::response::Redirect;
 use rocket::serde::json::Json;
 use rocket::State;
+use std::path::PathBuf;
 
 use crate::auth::AuthenticatedKey;
 use crate::db::{hash_key, DbPool};
@@ -1350,4 +1351,20 @@ pub fn redirect_short_url(
             }),
         )),
     }
+}
+
+// ============ SPA Fallback ============
+
+/// Catch-all route for client-side routing. Serves index.html for any GET
+/// request that didn't match an API route, static file, or short URL redirect.
+/// Rank 20 ensures this runs after FileServer and all other routes.
+#[get("/<_path..>", rank = 20)]
+pub fn spa_fallback(_path: PathBuf) -> Option<(ContentType, Vec<u8>)> {
+    let static_dir: PathBuf = std::env::var("STATIC_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("../frontend/dist"));
+    let index_path = static_dir.join("index.html");
+    std::fs::read(&index_path)
+        .ok()
+        .map(|bytes| (ContentType::HTML, bytes))
 }

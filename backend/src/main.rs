@@ -9,7 +9,9 @@ mod rate_limit;
 mod routes;
 
 use rocket::fairing::AdHoc;
+use rocket::fs::{FileServer, Options};
 use rocket_cors::{AllowedOrigins, CorsOptions};
+use std::path::PathBuf;
 use std::time::Duration;
 
 #[launch]
@@ -24,12 +26,17 @@ fn rocket() -> _ {
         .unwrap_or(60);
     let limiter = rate_limit::RateLimiter::new(Duration::from_secs(window_secs));
 
+    // Frontend static files directory (default: ../frontend/dist relative to CWD)
+    let static_dir: PathBuf = std::env::var("STATIC_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("../frontend/dist"));
+
     let cors = CorsOptions::default()
         .allowed_origins(AllowedOrigins::all())
         .to_cors()
         .expect("CORS configuration failed");
 
-    rocket::build()
+    let mut build = rocket::build()
         .attach(cors)
         .attach(rate_limit::RateLimitHeaders)
         .attach(AdHoc::on_ignite("Database", |rocket| async {
@@ -59,5 +66,20 @@ fn rocket() -> _ {
                 routes::delete_key,
             ],
         )
-        .mount("/", routes![routes::redirect_short_url])
+        .mount("/", routes![routes::redirect_short_url]);
+
+    // Serve frontend static files if the directory exists
+    if static_dir.is_dir() {
+        println!("📦 Serving frontend from: {}", static_dir.display());
+        build = build
+            .mount("/", FileServer::new(&static_dir, Options::Index))
+            .mount("/", routes![routes::spa_fallback]);
+    } else {
+        println!(
+            "⚠️  Frontend directory not found: {} (API-only mode)",
+            static_dir.display()
+        );
+    }
+
+    build
 }

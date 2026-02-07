@@ -73,17 +73,25 @@ Pre-built templates for common use cases:
 ### Running Locally
 
 ```bash
+# Build the frontend first
+cd frontend && npm install && npm run build && cd ..
+
+# Run the backend (serves API + frontend on one port)
 cd backend
 cargo run
 ```
 
-On first run, an admin API key is auto-generated and printed to stdout — **save it!**
+Open `http://localhost:8000` for the dashboard. On first run, an admin API key is auto-generated and printed to stdout — **save it!**
+
+The backend automatically detects `frontend/dist/` and serves static files alongside the API. If the directory is missing, it runs in API-only mode.
 
 ### Docker
 
 ```bash
 docker compose up
 ```
+
+The Docker image includes both backend and frontend in a single container.
 
 ### Configuration
 
@@ -96,6 +104,7 @@ Set via environment variables or `.env` file:
 | `ROCKET_PORT` | `8000` | Listen port |
 | `BASE_URL` | `http://localhost:8000` | Base URL for short URL generation |
 | `RATE_LIMIT_WINDOW_SECS` | `60` | Rate limit window in seconds |
+| `STATIC_DIR` | `../frontend/dist` | Path to frontend build output |
 
 ## API Quick Start
 
@@ -219,24 +228,30 @@ curl -X POST http://localhost:8000/api/v1/qr/batch \
 
 A React-based dashboard for human users. Provides a visual interface for all API features.
 
-### Running the Frontend
+### Unified Serving (Recommended)
+
+Build the frontend, then run the backend — it serves everything on one port:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+cd frontend && npm install && npm run build && cd ..
+cd backend && cargo run
 ```
 
-This starts a dev server at `http://localhost:3000` that proxies API requests to the backend at `http://localhost:8000`.
+Open `http://localhost:8000` — dashboard and API on the same origin, no CORS issues.
 
-### Building for Production
+### Development Mode
+
+For hot-reload during frontend development:
 
 ```bash
-cd frontend
-npm run build
+# Terminal 1: Backend
+cd backend && cargo run
+
+# Terminal 2: Frontend dev server (proxies API to backend)
+cd frontend && npm install && npm run dev
 ```
 
-The built files are in `frontend/dist/`. Serve them with any static file server, or integrate with the Rocket backend via a file server mount.
+Frontend dev server runs at `http://localhost:3000` with API proxied to `http://localhost:8000`.
 
 ### Features
 
@@ -246,12 +261,14 @@ The built files are in `frontend/dist/`. Serve them with any static file server,
 - **History** — Browse, download, and delete previously generated QR codes
 - **Rate limit display** — Real-time remaining request count in the header
 - **API key management** — Stored locally in the browser
+- **SPA routing** — All routes fall back to `index.html` for client-side navigation
 
 ## Roadmap
 
 - [ ] GitHub Actions CI (blocked on token scope)
 - [x] Rate limiting (per-key, fixed-window, in-memory)
 - [x] Frontend dashboard
+- [x] Unified serving (backend serves frontend + API on one port)
 - [ ] PDF output format
 - [ ] Logo/image overlay (center of QR, requires high EC)
 
