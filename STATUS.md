@@ -74,12 +74,11 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ### What's Next (Priority Order)
 
-1. **Push CI workflow** — needs `workflow` scope on GitHub token, or manual push via web UI
-2. **Rate limiting** — per-key rate limit exists in schema but isn't enforced
-3. **README update** — update README to document tracked QR and style features
-4. **Frontend** — React dashboard for human users
-5. **PDF output format** — mentioned in README, not yet implemented
-6. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
+1. **Rate limiting** — per-key rate limit exists in schema but isn't enforced. Implement middleware to check requests_count against rate_limit per time window.
+2. **Push CI workflow** — `.github/workflows/ci.yml` exists locally but needs `workflow` scope on GitHub token, or manual push via web UI (attempts: 2)
+3. **Frontend** — React dashboard for human users
+4. **PDF output format** — mentioned in roadmap, not yet implemented
+5. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
 
 ### ⚠️ Gotchas
 
@@ -101,4 +100,4 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ---
 
-*Last updated: 2026-02-07 08:55 UTC — Session: OpenAPI spec update (tracked QR, API keys, templates)*
+*Last updated: 2026-02-07 08:58 UTC — Session: OpenAPI spec + README rewrite*
