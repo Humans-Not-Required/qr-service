@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "QR Service API",
-    "description": "Agent QR Code Service - Generate, customize, and decode QR codes",
-    "version": "0.1.0",
+    "description": "Agent QR Code Service — Generate, customize, decode, and track QR codes via REST API. Supports styled rendering, batch generation, templates, tracked QR codes with short URL redirects and scan analytics.",
+    "version": "0.2.0",
     "contact": {
       "name": "Humans-Not-Required",
       "url": "https://github.com/Humans-Not-Required/qr-service"
@@ -14,8 +14,12 @@
   },
   "servers": [
     {
+      "url": "http://localhost:8000",
+      "description": "Local development (root — redirect routes live here)"
+    },
+    {
       "url": "http://localhost:8000/api/v1",
-      "description": "Local development"
+      "description": "Local development (API routes)"
     }
   ],
   "security": [
@@ -26,11 +30,30 @@
       "ApiKeyAuth": []
     }
   ],
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Service health and metadata"
+    },
+    {
+      "name": "QR Codes",
+      "description": "Generate, decode, and manage QR codes"
+    },
+    {
+      "name": "Tracked QR",
+      "description": "Tracked QR codes with short URL redirects and scan analytics"
+    },
+    {
+      "name": "API Keys",
+      "description": "Admin-only API key management"
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
         "summary": "Health check",
         "operationId": "health",
+        "tags": ["Health"],
         "security": [],
         "responses": {
           "200": {
@@ -46,7 +69,7 @@
                     },
                     "version": {
                       "type": "string",
-                      "example": "0.1.0"
+                      "example": "0.2.0"
                     },
                     "uptime_seconds": {
                       "type": "integer"
@@ -59,10 +82,32 @@
         }
       }
     },
+    "/openapi.json": {
+      "get": {
+        "summary": "OpenAPI specification",
+        "operationId": "getOpenApiSpec",
+        "tags": ["Health"],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.0 JSON specification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/qr/generate": {
       "post": {
         "summary": "Generate a QR code",
+        "description": "Generate a QR code from text or URL data. Supports PNG and SVG output, custom colors, sizes, error correction levels, and rendering styles (square, rounded, dots).",
         "operationId": "generateQr",
+        "tags": ["QR Codes"],
         "requestBody": {
           "required": true,
           "content": {
@@ -85,7 +130,17 @@
             }
           },
           "400": {
-            "description": "Invalid request",
+            "description": "Invalid request (empty data, invalid size, bad color, unsupported format)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
             "content": {
               "application/json": {
                 "schema": {
@@ -100,7 +155,9 @@
     "/qr/decode": {
       "post": {
         "summary": "Decode a QR code from image",
+        "description": "Upload a raw image (PNG, JPEG, etc.) and extract the encoded data. Uses the rqrr decoder for reliable detection.",
         "operationId": "decodeQr",
+        "tags": ["QR Codes"],
         "requestBody": {
           "required": true,
           "content": {
@@ -122,6 +179,29 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Failed to load image",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
+          },
+          "422": {
+            "description": "No QR code found in image",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         }
       }
@@ -129,16 +209,16 @@
     "/qr/batch": {
       "post": {
         "summary": "Batch generate QR codes",
+        "description": "Generate up to 50 QR codes in a single request. Each item supports the same options as the single generate endpoint. Failed items are silently skipped.",
         "operationId": "batchGenerate",
+        "tags": ["QR Codes"],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "items"
-                ],
+                "required": ["items"],
                 "properties": {
                   "items": {
                     "type": "array",
@@ -162,6 +242,19 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Empty batch or exceeds 50 items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
           }
         }
       }
@@ -169,7 +262,9 @@
     "/qr/template/{type}": {
       "post": {
         "summary": "Generate QR from template",
+        "description": "Generate a QR code from a predefined template type. Supports wifi (network credentials), vcard (contact info), and url (with optional UTM parameters).",
         "operationId": "generateFromTemplate",
+        "tags": ["QR Codes"],
         "parameters": [
           {
             "name": "type",
@@ -177,12 +272,9 @@
             "required": true,
             "schema": {
               "type": "string",
-              "enum": [
-                "wifi",
-                "vcard",
-                "url"
-              ]
-            }
+              "enum": ["wifi", "vcard", "url"]
+            },
+            "description": "Template type"
           }
         ],
         "requestBody": {
@@ -190,7 +282,17 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/WifiTemplateRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/VcardTemplateRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/UrlTemplateRequest"
+                  }
+                ]
               }
             }
           }
@@ -205,6 +307,19 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Missing required fields or unknown template type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
           }
         }
       }
@@ -212,14 +327,17 @@
     "/qr/history": {
       "get": {
         "summary": "List generated QR codes",
+        "description": "Paginated list of QR codes generated by the authenticated API key.",
         "operationId": "getHistory",
+        "tags": ["QR Codes"],
         "parameters": [
           {
             "name": "page",
             "in": "query",
             "schema": {
               "type": "integer",
-              "default": 1
+              "default": 1,
+              "minimum": 1
             }
           },
           {
@@ -228,6 +346,7 @@
             "schema": {
               "type": "integer",
               "default": 20,
+              "minimum": 1,
               "maximum": 100
             }
           }
@@ -242,6 +361,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
           }
         }
       }
@@ -249,58 +371,9 @@
     "/qr/{id}": {
       "get": {
         "summary": "Get a specific QR code",
+        "description": "Retrieve a QR code by ID, including its base64-encoded image data URI.",
         "operationId": "getQrById",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "QR code details",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QrResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "summary": "Delete a QR code",
-        "operationId": "deleteQr",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "QR code deleted"
-          }
-        }
-      }
-    },
-    "/qr/{id}/image": {
-      "get": {
-        "summary": "Get raw QR image",
-        "description": "Returns the raw image bytes (PNG or SVG) with proper Content-Type header. No base64 encoding overhead \u2014 ideal for agents that need the image directly.",
-        "operationId": "getQrImage",
-        "tags": [
-          "QR Codes"
-        ],
+        "tags": ["QR Codes"],
         "parameters": [
           {
             "name": "id",
@@ -313,9 +386,93 @@
             "description": "QR code ID"
           }
         ],
-        "security": [
+        "responses": {
+          "200": {
+            "description": "QR code details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QrResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
+          },
+          "404": {
+            "description": "QR code not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a QR code",
+        "operationId": "deleteQr",
+        "tags": ["QR Codes"],
+        "parameters": [
           {
-            "ApiKeyAuth": []
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "QR code ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "QR code deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
+          },
+          "404": {
+            "description": "QR code not found"
+          }
+        }
+      }
+    },
+    "/qr/{id}/image": {
+      "get": {
+        "summary": "Get raw QR image",
+        "description": "Returns the raw image bytes (PNG or SVG) with proper Content-Type header. No base64 encoding overhead — ideal for agents that need the image directly.",
+        "operationId": "getQrImage",
+        "tags": ["QR Codes"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "QR code ID"
           }
         ],
         "responses": {
@@ -337,14 +494,7 @@
             }
           },
           "401": {
-            "description": "Missing or invalid API key",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
+            "description": "Missing or invalid API key"
           },
           "404": {
             "description": "QR code not found",
@@ -358,26 +508,333 @@
           }
         }
       }
+    },
+    "/qr/tracked": {
+      "post": {
+        "summary": "Create a tracked QR code",
+        "description": "Create a tracked QR code that encodes a short URL (`/r/{code}`) redirecting to the target URL. Each scan is recorded with timestamp, User-Agent, and Referer for analytics. Supports custom short codes and optional expiry.",
+        "operationId": "createTrackedQr",
+        "tags": ["Tracked QR"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTrackedQrRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tracked QR code created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackedQrResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (empty URL, invalid URL scheme, invalid short code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
+          },
+          "409": {
+            "description": "Short code already taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List tracked QR codes",
+        "description": "Paginated list of tracked QR codes for the authenticated API key.",
+        "operationId": "listTrackedQr",
+        "tags": ["Tracked QR"],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of tracked QR codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackedQrListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
+          }
+        }
+      }
+    },
+    "/qr/tracked/{id}/stats": {
+      "get": {
+        "summary": "Get scan analytics",
+        "description": "Get scan analytics for a tracked QR code, including total scan count and the last 100 scan events with timestamps, User-Agent, and Referer.",
+        "operationId": "getTrackedQrStats",
+        "tags": ["Tracked QR"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Tracked QR code ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scan analytics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackedQrStatsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
+          },
+          "404": {
+            "description": "Tracked QR code not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/qr/tracked/{id}": {
+      "delete": {
+        "summary": "Delete a tracked QR code",
+        "description": "Delete a tracked QR code along with all its scan events and the underlying QR code record.",
+        "operationId": "deleteTrackedQr",
+        "tags": ["Tracked QR"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Tracked QR code ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tracked QR code deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
+          },
+          "404": {
+            "description": "Tracked QR code not found"
+          }
+        }
+      }
+    },
+    "/keys": {
+      "get": {
+        "summary": "List API keys",
+        "description": "List all API keys. Admin access required.",
+        "operationId": "listKeys",
+        "tags": ["API Keys"],
+        "responses": {
+          "200": {
+            "description": "List of API keys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KeyResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
+          },
+          "403": {
+            "description": "Admin access required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create API key",
+        "description": "Create a new API key. Admin access required. The key value is only returned once in the response — save it!",
+        "operationId": "createKey",
+        "tags": ["API Keys"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateKeyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "API key created (key field contains the plaintext key — save it!)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/keys/{id}": {
+      "delete": {
+        "summary": "Revoke API key",
+        "description": "Revoke (deactivate) an API key. Admin access required.",
+        "operationId": "revokeKey",
+        "tags": ["API Keys"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "API key ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "API key revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revoked": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "404": {
+            "description": "API key not found"
+          }
+        }
+      }
     }
   },
   "components": {
     "securitySchemes": {
       "BearerAuth": {
         "type": "http",
-        "scheme": "bearer"
+        "scheme": "bearer",
+        "description": "Pass API key as Bearer token: `Authorization: Bearer qrs_...`"
       },
       "ApiKeyAuth": {
         "type": "apiKey",
         "in": "header",
-        "name": "X-API-Key"
+        "name": "X-API-Key",
+        "description": "Pass API key in X-API-Key header"
       }
     },
     "schemas": {
       "GenerateRequest": {
         "type": "object",
-        "required": [
-          "data"
-        ],
+        "required": ["data"],
         "properties": {
           "data": {
             "type": "string",
@@ -385,22 +842,21 @@
           },
           "format": {
             "type": "string",
-            "enum": [
-              "png",
-              "svg"
-            ],
-            "default": "png"
+            "enum": ["png", "svg"],
+            "default": "png",
+            "description": "Output image format"
           },
           "size": {
             "type": "integer",
             "minimum": 64,
             "maximum": 4096,
-            "default": 256
+            "default": 256,
+            "description": "Image size in pixels (width = height)"
           },
           "fg_color": {
             "type": "string",
             "default": "#000000",
-            "description": "Foreground color (hex)"
+            "description": "Foreground color (hex, e.g. '#FF0000' or '#F00')"
           },
           "bg_color": {
             "type": "string",
@@ -409,23 +865,15 @@
           },
           "error_correction": {
             "type": "string",
-            "enum": [
-              "L",
-              "M",
-              "Q",
-              "H"
-            ],
-            "default": "M"
+            "enum": ["L", "M", "Q", "H"],
+            "default": "M",
+            "description": "Error correction level (L=7%, M=15%, Q=25%, H=30%)"
           },
           "style": {
             "type": "string",
-            "description": "Module rendering style. 'square' = standard sharp modules, 'rounded' = modules with rounded corners (context-aware, only rounds exposed corners), 'dots' = circular modules",
-            "enum": [
-              "square",
-              "rounded",
-              "dots"
-            ],
-            "default": "square"
+            "enum": ["square", "rounded", "dots"],
+            "default": "square",
+            "description": "Module rendering style. square=standard sharp modules, rounded=context-aware rounded corners, dots=circular modules"
           }
         }
       },
@@ -437,7 +885,8 @@
             "format": "uuid"
           },
           "data": {
-            "type": "string"
+            "type": "string",
+            "description": "The encoded data"
           },
           "format": {
             "type": "string"
@@ -447,7 +896,7 @@
           },
           "image_base64": {
             "type": "string",
-            "description": "Base64-encoded image data URI"
+            "description": "Base64-encoded data URI (e.g. 'data:image/png;base64,...')"
           },
           "created_at": {
             "type": "string",
@@ -465,7 +914,8 @@
             }
           },
           "total": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Number of successfully generated QR codes"
           }
         }
       },
@@ -473,10 +923,12 @@
         "type": "object",
         "properties": {
           "data": {
-            "type": "string"
+            "type": "string",
+            "description": "Decoded content from the QR code"
           },
           "format": {
-            "type": "string"
+            "type": "string",
+            "description": "Always 'qr'"
           }
         }
       },
@@ -486,24 +938,7 @@
           "items": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "data": {
-                  "type": "string"
-                },
-                "format": {
-                  "type": "string"
-                },
-                "size": {
-                  "type": "integer"
-                },
-                "created_at": {
-                  "type": "string"
-                }
-              }
+              "$ref": "#/components/schemas/QrHistoryItem"
             }
           },
           "total": {
@@ -517,17 +952,403 @@
           }
         }
       },
+      "QrHistoryItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "data": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateTrackedQrRequest": {
+        "type": "object",
+        "required": ["target_url"],
+        "properties": {
+          "target_url": {
+            "type": "string",
+            "description": "The destination URL that the short URL will redirect to. Must start with http:// or https://.",
+            "example": "https://example.com/my-landing-page"
+          },
+          "short_code": {
+            "type": "string",
+            "description": "Custom short code (3-32 chars, alphanumeric/hyphens/underscores). Auto-generated if omitted.",
+            "minLength": 3,
+            "maxLength": 32,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "example": "my-campaign"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Optional expiry timestamp (ISO-8601). After this time, the short URL returns 410 Gone.",
+            "example": "2026-12-31T23:59:59Z"
+          },
+          "format": {
+            "type": "string",
+            "enum": ["png", "svg"],
+            "default": "png"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 4096,
+            "default": 256
+          },
+          "fg_color": {
+            "type": "string",
+            "default": "#000000"
+          },
+          "bg_color": {
+            "type": "string",
+            "default": "#FFFFFF"
+          },
+          "error_correction": {
+            "type": "string",
+            "enum": ["L", "M", "Q", "H"],
+            "default": "M"
+          },
+          "style": {
+            "type": "string",
+            "enum": ["square", "rounded", "dots"],
+            "default": "square"
+          }
+        }
+      },
+      "TrackedQrResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tracked QR code ID"
+          },
+          "qr_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID of the underlying QR code record"
+          },
+          "short_code": {
+            "type": "string",
+            "description": "The short code used in the redirect URL"
+          },
+          "short_url": {
+            "type": "string",
+            "description": "Full short URL encoded in the QR code (e.g. 'http://localhost:8000/r/my-code')"
+          },
+          "target_url": {
+            "type": "string",
+            "description": "The destination URL"
+          },
+          "scan_count": {
+            "type": "integer",
+            "description": "Number of times the short URL has been scanned"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "qr": {
+            "$ref": "#/components/schemas/QrResponse",
+            "description": "The generated QR code (with base64 image)"
+          }
+        }
+      },
+      "TrackedQrListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrackedQrListItem"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "TrackedQrListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "short_code": {
+            "type": "string"
+          },
+          "target_url": {
+            "type": "string"
+          },
+          "scan_count": {
+            "type": "integer"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TrackedQrStatsResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "short_code": {
+            "type": "string"
+          },
+          "target_url": {
+            "type": "string"
+          },
+          "scan_count": {
+            "type": "integer"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recent_scans": {
+            "type": "array",
+            "description": "Last 100 scan events, newest first",
+            "items": {
+              "$ref": "#/components/schemas/ScanEvent"
+            }
+          }
+        }
+      },
+      "ScanEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scanned_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "user_agent": {
+            "type": "string",
+            "nullable": true,
+            "description": "User-Agent header from the scan request"
+          },
+          "referrer": {
+            "type": "string",
+            "nullable": true,
+            "description": "Referer header from the scan request"
+          }
+        }
+      },
+      "WifiTemplateRequest": {
+        "type": "object",
+        "required": ["ssid"],
+        "properties": {
+          "ssid": {
+            "type": "string",
+            "description": "WiFi network name"
+          },
+          "password": {
+            "type": "string",
+            "description": "WiFi password (empty for open networks)"
+          },
+          "encryption": {
+            "type": "string",
+            "enum": ["WPA2", "WPA", "WEP", "nopass"],
+            "default": "WPA2"
+          },
+          "hidden": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the network is hidden"
+          },
+          "format": {
+            "type": "string",
+            "enum": ["png", "svg"],
+            "default": "png"
+          },
+          "size": {
+            "type": "integer",
+            "default": 256
+          },
+          "style": {
+            "type": "string",
+            "enum": ["square", "rounded", "dots"],
+            "default": "square"
+          }
+        }
+      },
+      "VcardTemplateRequest": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Contact full name"
+          },
+          "email": {
+            "type": "string"
+          },
+          "phone": {
+            "type": "string"
+          },
+          "org": {
+            "type": "string",
+            "description": "Organization name"
+          },
+          "title": {
+            "type": "string",
+            "description": "Job title"
+          },
+          "url": {
+            "type": "string",
+            "description": "Website URL"
+          },
+          "format": {
+            "type": "string",
+            "enum": ["png", "svg"],
+            "default": "png"
+          },
+          "size": {
+            "type": "integer",
+            "default": 256
+          },
+          "style": {
+            "type": "string",
+            "enum": ["square", "rounded", "dots"],
+            "default": "square"
+          }
+        }
+      },
+      "UrlTemplateRequest": {
+        "type": "object",
+        "required": ["url"],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to encode"
+          },
+          "utm_source": {
+            "type": "string",
+            "description": "UTM source parameter"
+          },
+          "utm_medium": {
+            "type": "string",
+            "description": "UTM medium parameter"
+          },
+          "utm_campaign": {
+            "type": "string",
+            "description": "UTM campaign parameter"
+          },
+          "format": {
+            "type": "string",
+            "enum": ["png", "svg"],
+            "default": "png"
+          },
+          "size": {
+            "type": "integer",
+            "default": 256
+          },
+          "style": {
+            "type": "string",
+            "enum": ["square", "rounded", "dots"],
+            "default": "square"
+          }
+        }
+      },
+      "CreateKeyRequest": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Human-readable name for the API key"
+          },
+          "rate_limit": {
+            "type": "integer",
+            "description": "Rate limit (requests per minute). Not yet enforced.",
+            "nullable": true
+          }
+        }
+      },
+      "KeyResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "nullable": true,
+            "description": "Plaintext API key (only returned on creation — save it!)"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "requests_count": {
+            "type": "integer"
+          },
+          "rate_limit": {
+            "type": "integer",
+            "nullable": true
+          },
+          "active": {
+            "type": "boolean"
+          }
+        }
+      },
       "ApiError": {
         "type": "object",
         "properties": {
           "error": {
-            "type": "string"
+            "type": "string",
+            "description": "Human-readable error message"
           },
           "code": {
-            "type": "string"
+            "type": "string",
+            "description": "Machine-readable error code"
           },
           "status": {
-            "type": "integer"
+            "type": "integer",
+            "description": "HTTP status code"
           }
         }
       }
