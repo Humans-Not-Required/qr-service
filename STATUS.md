@@ -1,6 +1,6 @@
 # QR Service - Status
 
-## Current State: MVP Backend ✅ + Style Rendering ✅ + Tracked QR / Short URLs ✅ + OpenAPI Complete ✅ + Rate Limiting ✅ + Rate Limit Headers ✅
+## Current State: MVP Backend ✅ + Style Rendering ✅ + Tracked QR / Short URLs ✅ + OpenAPI Complete ✅ + Rate Limiting ✅ + Rate Limit Headers ✅ + Frontend ✅
 
 The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generation, decoding, raw image serving, styled rendering, tracked QR codes with scan analytics, and per-key rate limiting all work end-to-end. All clippy warnings resolved, all code formatted.
 
@@ -92,11 +92,12 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 ### What's Next (Priority Order)
 
 1. ~~**Push CI workflow**~~ — BLOCKED (attempts: 3). Token lacks `workflow` scope. File exists locally at `.github/workflows/ci.yml`. Needs manual push via GitHub web UI or token scope update by Jordan.
-2. **Frontend** — React dashboard for human users
-3. **PDF output format** — mentioned in roadmap, not yet implemented
-4. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
+2. ~~**Frontend**~~ ✅ Done — React dashboard with generate/decode/templates/history tabs
+3. **Serve frontend from Rocket** — Mount static file server for `frontend/dist/` so single binary serves both API + UI
+4. **PDF output format** — mentioned in roadmap, not yet implemented
+5. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
 
-**Consider deployable?** Core API is feature-complete: generate, decode, batch, templates, styles, tracked QR/short URLs, rate limiting with headers, OpenAPI spec, Docker support. README has setup instructions. Tests pass. This is deployable — remaining items are enhancements.
+**Consider deployable?** Core API is feature-complete: generate, decode, batch, templates, styles, tracked QR/short URLs, rate limiting with headers, OpenAPI spec, Docker support, React frontend. README has setup instructions. Tests pass. This is deployable — remaining items are enhancements.
 
 ### ⚠️ Gotchas
 
@@ -120,4 +121,4 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ---
 
-*Last updated: 2026-02-07 11:41 UTC — Session: CI push blocked (3 attempts), moving to kanban*
+*Last updated: 2026-02-07 13:45 UTC — Session: React frontend shipped (generate/decode/templates/history)*
