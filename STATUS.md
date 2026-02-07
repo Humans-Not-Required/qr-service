@@ -1,6 +1,6 @@
 # QR Service - Status
 
-## Current State: MVP Backend ✅ + Style Rendering ✅ + Tracked QR / Short URLs ✅ + OpenAPI Complete ✅ + Rate Limiting ✅
+## Current State: MVP Backend ✅ + Style Rendering ✅ + Tracked QR / Short URLs ✅ + OpenAPI Complete ✅ + Rate Limiting ✅ + Rate Limit Headers ✅
 
 The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generation, decoding, raw image serving, styled rendering, tracked QR codes with scan analytics, and per-key rate limiting all work end-to-end. All clippy warnings resolved, all code formatted.
 
@@ -39,7 +39,7 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
     - Increments scan count atomically
     - Checks expiry (returns 410 Gone if expired)
     - Returns 302 Temporary Redirect to target URL
-- **Rate Limiting** (NEW):
+- **Rate Limiting:**
   - Fixed-window per-key enforcement via in-memory rate limiter
   - Each API key has a configurable `rate_limit` (requests per window)
   - Default: 100 req/min for regular keys, 10,000 for admin keys
@@ -47,6 +47,13 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
   - Returns 429 Too Many Requests when limit exceeded
   - Zero database overhead — all tracking is in-memory
   - 3 unit tests for rate limiter (under limit, at limit, key isolation)
+- **Rate Limit Response Headers** (NEW):
+  - `X-RateLimit-Limit` — max requests allowed in current window
+  - `X-RateLimit-Remaining` — requests remaining in current window
+  - `X-RateLimit-Reset` — seconds until window resets
+  - Implemented via Rocket fairing reading request-local state from auth guard
+  - Headers appear on ALL authenticated responses (including 429 errors)
+  - Documented in OpenAPI spec v0.4.0
 - **Auth:** API key authentication via `Authorization: Bearer` or `X-API-Key` header
 - **Database:** SQLite with WAL mode, auto-creates admin key on first run
 - **Docker:** Dockerfile (multi-stage build) + docker-compose.yml
@@ -84,11 +91,12 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ### What's Next (Priority Order)
 
-1. **Rate limit response headers** — Add `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` headers to all responses so clients can self-regulate. The `RateLimitResult` struct already carries this data; need a Rocket fairing or response wrapper.
-2. **Push CI workflow** — `.github/workflows/ci.yml` exists locally but needs `workflow` scope on GitHub token, or manual push via web UI (attempts: 2)
-3. **Frontend** — React dashboard for human users
-4. **PDF output format** — mentioned in roadmap, not yet implemented
-5. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
+1. **Push CI workflow** — `.github/workflows/ci.yml` exists locally but needs `workflow` scope on GitHub token, or manual push via web UI (attempts: 2)
+2. **Frontend** — React dashboard for human users
+3. **PDF output format** — mentioned in roadmap, not yet implemented
+4. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
+
+**Consider deployable?** Core API is feature-complete: generate, decode, batch, templates, styles, tracked QR/short URLs, rate limiting with headers, OpenAPI spec, Docker support. README has setup instructions. Tests pass. This is deployable — remaining items are enhancements.
 
 ### ⚠️ Gotchas
 
@@ -96,7 +104,7 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 - CI workflow push blocked — GitHub token lacks `workflow` scope
 - Styles accepted but style column in DB is informational only (not used for re-rendering)
 - CORS wide open (all origins) — tighten for production
-- OpenAPI spec is at v0.3.0 — 14 paths, 18 schemas, rate limit documented
+- OpenAPI spec is at v0.4.0 — 14 paths, 18 schemas + 3 headers, rate limit fully documented
 - BASE_URL defaults to `http://localhost:8000` — must be set in production for correct short URLs
 - Rate limiter state is in-memory — resets on server restart (not an issue for abuse prevention, but clients aren't "punished" across restarts)
 
@@ -112,4 +120,4 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ---
 
-*Last updated: 2026-02-07 09:07 UTC — Session: Rate limiting implementation*
+*Last updated: 2026-02-07 09:17 UTC — Session: Rate limit response headers*
