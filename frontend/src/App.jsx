@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { generateQR, decodeQR, getHistory, deleteQR, generateFromTemplate, healthCheck } from './api'
+import { useState, useCallback } from 'react'
+import { generateQR, decodeQR, generateFromTemplate, createTrackedQR, getTrackedStats, deleteTrackedQR, healthCheck } from './api'
 
 const STYLES = ['square', 'rounded', 'dots'];
 const FORMATS = ['png', 'svg'];
@@ -8,27 +8,12 @@ const TEMPLATES = ['wifi', 'vcard', 'url'];
 
 function App() {
   const [tab, setTab] = useState('generate');
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('qr_api_key') || '');
-  const [showSettings, setShowSettings] = useState(!apiKey);
   const [serverStatus, setServerStatus] = useState(null);
   const [rateLimit, setRateLimit] = useState(null);
 
-  useEffect(() => {
-    localStorage.setItem('qr_api_key', apiKey);
-  }, [apiKey]);
-
-  const checkHealth = useCallback(async () => {
-    try {
-      await healthCheck();
-      setServerStatus('connected');
-    } catch {
-      setServerStatus('disconnected');
-    }
-  }, []);
-
-  useEffect(() => {
-    if (apiKey) checkHealth();
-  }, [apiKey, checkHealth]);
+  useState(() => {
+    healthCheck().then(() => setServerStatus('connected')).catch(() => setServerStatus('disconnected'));
+  });
 
   return (
     <div style={styles.container}>
@@ -49,30 +34,15 @@ function App() {
               {rateLimit.remaining}/{rateLimit.limit} req
             </span>
           )}
-          <button onClick={() => setShowSettings(s => !s)} style={styles.settingsBtn}>⚙️</button>
         </div>
       </header>
-
-      {showSettings && (
-        <div style={styles.settingsPanel}>
-          <label style={styles.label}>API Key</label>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={e => setApiKey(e.target.value)}
-            placeholder="Enter your API key..."
-            style={styles.input}
-          />
-          <p style={styles.hint}>Your key is stored locally and never sent to third parties.</p>
-        </div>
-      )}
 
       <nav style={styles.nav}>
         {[
           ['generate', '🔳 Generate'],
           ['decode', '🔍 Decode'],
           ['templates', '📋 Templates'],
-          ['history', '📜 History'],
+          ['tracked', '📊 Tracked'],
         ].map(([id, label]) => (
           <button
             key={id}
@@ -88,11 +58,13 @@ function App() {
         {tab === 'generate' && <GenerateTab onRateLimit={setRateLimit} />}
         {tab === 'decode' && <DecodeTab onRateLimit={setRateLimit} />}
         {tab === 'templates' && <TemplatesTab onRateLimit={setRateLimit} />}
-        {tab === 'history' && <HistoryTab onRateLimit={setRateLimit} />}
+        {tab === 'tracked' && <TrackedTab onRateLimit={setRateLimit} />}
       </main>
 
       <footer style={styles.footer}>
         <a href="/api/v1/openapi.json" target="_blank" rel="noopener" style={styles.footerLink}>OpenAPI Spec</a>
+        <span style={styles.footerSep}>·</span>
+        <a href="/api/v1/health" target="_blank" rel="noopener" style={styles.footerLink}>Health</a>
         <span style={styles.footerSep}>·</span>
         <a href="https://github.com/Humans-Not-Required/qr-service" target="_blank" rel="noopener" style={styles.footerLink}>GitHub</a>
         <span style={styles.footerSep}>·</span>
@@ -206,19 +178,25 @@ function GenerateTab({ onRateLimit }) {
         <div style={styles.resultCard}>
           <div style={styles.qrPreview}>
             {result.format === 'svg' ? (
-              <div dangerouslySetInnerHTML={{ __html: atob(result.image.replace('data:image/svg+xml;base64,', '')) }} />
+              <div dangerouslySetInnerHTML={{ __html: atob(result.image_base64.replace('data:image/svg+xml;base64,', '')) }} />
             ) : (
-              <img src={result.image} alt="Generated QR code" style={styles.qrImage} />
+              <img src={result.image_base64} alt="Generated QR code" style={styles.qrImage} />
             )}
           </div>
           <div style={styles.resultMeta}>
-            <p><strong>ID:</strong> <code style={styles.code}>{result.id}</code></p>
-            <p><strong>Format:</strong> {result.format.toUpperCase()}</p>
-            <p><strong>Size:</strong> {result.size}px</p>
-            <p><strong>Style:</strong> {result.style}</p>
+            <p><strong>Format:</strong> {result.format.toUpperCase()} · <strong>Size:</strong> {result.size}px</p>
+            {result.share_url && (
+              <p>
+                <strong>Share:</strong>{' '}
+                <a href={result.share_url} target="_blank" rel="noopener" style={styles.footerLink}>
+                  {result.share_url.length > 60 ? result.share_url.slice(0, 60) + '…' : result.share_url}
+                </a>
+                <button onClick={() => navigator.clipboard.writeText(result.share_url)} style={{ ...styles.secondaryBtn, marginLeft: '0.5rem', padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}>📋</button>
+              </p>
+            )}
             <div style={styles.resultActions}>
-              <a href={result.image} download={`qr-${result.id}.${result.format}`} style={styles.secondaryBtn}>⬇️ Download</a>
-              <button onClick={() => navigator.clipboard.writeText(result.image)} style={styles.secondaryBtn}>📋 Copy Data URI</button>
+              <a href={result.image_base64} download={`qr.${result.format}`} style={styles.secondaryBtn}>⬇️ Download</a>
+              <button onClick={() => navigator.clipboard.writeText(result.image_base64)} style={styles.secondaryBtn}>📋 Copy Data URI</button>
             </div>
           </div>
         </div>
@@ -236,9 +214,7 @@ function DecodeTab({ onRateLimit }) {
 
   const processFile = (file) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      setImageData(reader.result);
-    };
+    reader.onload = () => setImageData(reader.result);
     reader.readAsDataURL(file);
   };
 
@@ -320,15 +296,10 @@ function TemplatesTab({ onRateLimit }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // URL template
   const [url, setUrl] = useState('');
-
-  // WiFi template
   const [ssid, setSsid] = useState('');
   const [password, setPassword] = useState('');
   const [encryption, setEncryption] = useState('WPA');
-
-  // vCard template
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -341,13 +312,9 @@ function TemplatesTab({ onRateLimit }) {
     setError(null);
     try {
       let params;
-      if (template === 'url') {
-        params = { url };
-      } else if (template === 'wifi') {
-        params = { ssid, password, encryption };
-      } else {
-        params = { first_name: firstName, last_name: lastName, email, phone, organization: org };
-      }
+      if (template === 'url') params = { url };
+      else if (template === 'wifi') params = { ssid, password, encryption };
+      else params = { first_name: firstName, last_name: lastName, email, phone, organization: org };
       const { data: res, rateLimit } = await generateFromTemplate(template, params);
       setResult(res);
       onRateLimit(rateLimit);
@@ -439,11 +406,17 @@ function TemplatesTab({ onRateLimit }) {
       {result && (
         <div style={styles.resultCard}>
           <div style={styles.qrPreview}>
-            <img src={result.image} alt="Template QR code" style={styles.qrImage} />
+            <img src={result.image_base64 || result.image} alt="Template QR code" style={styles.qrImage} />
           </div>
           <div style={styles.resultMeta}>
-            <p><strong>ID:</strong> <code style={styles.code}>{result.id}</code></p>
-            <a href={result.image} download={`qr-${template}-${result.id}.png`} style={styles.secondaryBtn}>⬇️ Download</a>
+            {result.share_url && (
+              <p>
+                <strong>Share:</strong>{' '}
+                <a href={result.share_url} target="_blank" rel="noopener" style={styles.footerLink}>View Link</a>
+                <button onClick={() => navigator.clipboard.writeText(result.share_url)} style={{ ...styles.secondaryBtn, marginLeft: '0.5rem', padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}>📋</button>
+              </p>
+            )}
+            <a href={result.image_base64 || result.image} download={`qr-${template}.png`} style={styles.secondaryBtn}>⬇️ Download</a>
           </div>
         </div>
       )}
@@ -451,20 +424,32 @@ function TemplatesTab({ onRateLimit }) {
   );
 }
 
-function HistoryTab({ onRateLimit }) {
-  const [codes, setCodes] = useState([]);
-  const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
+function TrackedTab({ onRateLimit }) {
+  const [targetUrl, setTargetUrl] = useState('');
+  const [shortCode, setShortCode] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
+  const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(false);
 
-  const loadHistory = useCallback(async () => {
+  // Store created tracked QRs with their manage tokens in session
+  const [created, setCreated] = useState([]);
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (!targetUrl.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      const { data: res, rateLimit } = await getHistory(page, 12);
-      setCodes(res.items || res.codes || []);
-      setTotal(res.total || 0);
+      const { data: res, rateLimit } = await createTrackedQR({
+        targetUrl: targetUrl.trim(),
+        shortCode: shortCode.trim() || undefined,
+        expiresAt: expiresAt || undefined,
+      });
+      setResult(res);
+      setCreated(prev => [{ ...res }, ...prev]);
       onRateLimit(rateLimit);
     } catch (err) {
       setError(err.message);
@@ -472,60 +457,111 @@ function HistoryTab({ onRateLimit }) {
     } finally {
       setLoading(false);
     }
-  }, [page, onRateLimit]);
+  };
 
-  useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
-
-  const handleDelete = async (id) => {
-    if (!confirm('Delete this QR code?')) return;
+  const loadStats = async (item) => {
+    setStatsLoading(true);
+    setStats(null);
     try {
-      await deleteQR(id);
-      loadHistory();
+      const { data: res } = await getTrackedStats(item.id, item.manage_token);
+      setStats({ ...res, id: item.id });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+  const handleDelete = async (item) => {
+    if (!confirm('Delete this tracked QR code?')) return;
+    try {
+      await deleteTrackedQR(item.id, item.manage_token);
+      setCreated(prev => prev.filter(c => c.id !== item.id));
+      if (stats?.id === item.id) setStats(null);
     } catch (err) {
       setError(err.message);
     }
   };
 
-  const totalPages = Math.ceil(total / 12);
-
   return (
     <div>
-      {loading && <p style={styles.hint}>Loading...</p>}
+      <p style={styles.hint}>Create QR codes with short URLs that track scan analytics. Each tracked QR returns a manage token for viewing stats and deleting.</p>
+
+      <form onSubmit={handleCreate} style={{ ...styles.form, marginTop: '1rem' }}>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Target URL *</label>
+          <input value={targetUrl} onChange={e => setTargetUrl(e.target.value)} placeholder="https://example.com" style={styles.input} />
+        </div>
+        <div style={styles.formRow}>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Custom Short Code (optional)</label>
+            <input value={shortCode} onChange={e => setShortCode(e.target.value)} placeholder="my-link" style={styles.input} />
+          </div>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Expires At (optional)</label>
+            <input type="datetime-local" value={expiresAt} onChange={e => setExpiresAt(e.target.value)} style={styles.input} />
+          </div>
+        </div>
+        <button type="submit" disabled={loading || !targetUrl.trim()} style={styles.primaryBtn}>
+          {loading ? 'Creating...' : '📊 Create Tracked QR'}
+        </button>
+      </form>
+
       {error && <div style={styles.error}>{error}</div>}
 
-      {codes.length === 0 && !loading && (
-        <div style={styles.emptyState}>
-          <p style={{ fontSize: '2rem' }}>📭</p>
-          <p>No QR codes yet. Generate one to get started!</p>
+      {result && (
+        <div style={styles.resultCard}>
+          <div style={styles.qrPreview}>
+            <img src={result.qr?.image_base64 || result.image_base64} alt="Tracked QR code" style={styles.qrImage} />
+          </div>
+          <div style={styles.resultMeta}>
+            <p><strong>Short URL:</strong> <code style={styles.code}>{result.short_url}</code>
+              <button onClick={() => navigator.clipboard.writeText(result.short_url)} style={{ ...styles.secondaryBtn, marginLeft: '0.5rem', padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}>📋</button>
+            </p>
+            <p><strong>Manage Token:</strong> <code style={styles.code}>{result.manage_token}</code>
+              <button onClick={() => navigator.clipboard.writeText(result.manage_token)} style={{ ...styles.secondaryBtn, marginLeft: '0.5rem', padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}>📋</button>
+            </p>
+            <p style={{ ...styles.hint, color: '#fbbf24' }}>⚠️ Save your manage token — it's shown only once!</p>
+          </div>
         </div>
       )}
 
-      <div style={styles.historyGrid}>
-        {codes.map(code => (
-          <div key={code.id} style={styles.historyCard}>
-            <img src={code.image} alt="QR code" style={styles.historyImage} />
-            <div style={styles.historyMeta}>
-              <p style={styles.historyData} title={code.data}>
-                {code.data?.length > 40 ? code.data.slice(0, 40) + '…' : code.data}
-              </p>
-              <p style={styles.historyDate}>{new Date(code.created_at).toLocaleString()}</p>
+      {created.length > 0 && (
+        <div style={{ marginTop: '2rem' }}>
+          <h3 style={{ color: '#f8fafc', fontSize: '1rem', marginBottom: '0.75rem' }}>Created This Session</h3>
+          {created.map(item => (
+            <div key={item.id} style={{ ...styles.resultCard, marginTop: '0.5rem', padding: '0.75rem' }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: 0, fontSize: '0.85rem' }}>
+                  <strong>{item.short_url}</strong> → {item.target_url}
+                </p>
+                <p style={styles.hint}>Scans: {item.scan_count || 0}</p>
+              </div>
               <div style={{ display: 'flex', gap: '0.25rem' }}>
-                <span style={styles.tag}>{code.format}</span>
-                {code.style && code.style !== 'square' && <span style={styles.tag}>{code.style}</span>}
+                <button onClick={() => loadStats(item)} style={styles.secondaryBtn} disabled={statsLoading}>📊</button>
+                <button onClick={() => handleDelete(item)} style={{ ...styles.secondaryBtn, color: '#ef4444' }}>🗑️</button>
               </div>
             </div>
-            <button onClick={() => handleDelete(code.id)} style={styles.deleteBtn} title="Delete">🗑️</button>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
-      {totalPages > 1 && (
-        <div style={styles.pagination}>
-          <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} style={styles.secondaryBtn}>← Prev</button>
-          <span style={styles.hint}>Page {page} of {totalPages}</span>
-          <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} style={styles.secondaryBtn}>Next →</button>
+      {stats && (
+        <div style={{ ...styles.resultCard, marginTop: '1rem' }}>
+          <div>
+            <h3 style={{ color: '#f8fafc', fontSize: '1rem', margin: '0 0 0.5rem' }}>Scan Stats</h3>
+            <p><strong>Total scans:</strong> {stats.scan_count}</p>
+            <p><strong>Target:</strong> {stats.target_url}</p>
+            {stats.expires_at && <p><strong>Expires:</strong> {new Date(stats.expires_at).toLocaleString()}</p>}
+            {stats.recent_scans?.length > 0 && (
+              <div style={{ marginTop: '0.5rem' }}>
+                <strong>Recent scans:</strong>
+                {stats.recent_scans.slice(0, 5).map((s, i) => (
+                  <p key={i} style={styles.hint}>{new Date(s.scanned_at).toLocaleString()} — {s.user_agent?.slice(0, 50) || 'Unknown'}</p>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -564,19 +600,13 @@ const styles = {
     padding: '0.2rem 0.5rem',
     borderRadius: 4,
   },
-  settingsBtn: { background: 'none', border: 'none', fontSize: '1.25rem', cursor: 'pointer' },
-  settingsPanel: {
-    backgroundColor: '#1e293b',
-    borderRadius: 8,
-    padding: '1rem',
-    marginBottom: '1rem',
-  },
   nav: {
     display: 'flex',
     gap: '0.25rem',
     marginBottom: '1.5rem',
     borderBottom: '1px solid #1e293b',
     paddingBottom: '0.5rem',
+    flexWrap: 'wrap',
   },
   navBtn: {
     background: 'none',
@@ -702,51 +732,7 @@ const styles = {
     cursor: 'pointer',
     transition: 'all 0.2s',
   },
-  historyGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
-    gap: '1rem',
-  },
-  historyCard: {
-    backgroundColor: '#1e293b',
-    borderRadius: 8,
-    padding: '1rem',
-    display: 'flex',
-    gap: '0.75rem',
-    alignItems: 'center',
-    position: 'relative',
-  },
-  historyImage: { width: 64, height: 64, borderRadius: 4, imageRendering: 'pixelated', flexShrink: 0 },
-  historyMeta: { flex: 1, minWidth: 0 },
-  historyData: { margin: 0, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  historyDate: { margin: '0.25rem 0 0', fontSize: '0.75rem', color: '#64748b' },
-  tag: {
-    fontSize: '0.7rem',
-    backgroundColor: '#374151',
-    borderRadius: 3,
-    padding: '0.1rem 0.35rem',
-    color: '#94a3b8',
-    textTransform: 'uppercase',
-  },
-  deleteBtn: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: '0.85rem',
-    opacity: 0.5,
-    transition: 'opacity 0.15s',
-  },
-  pagination: {
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: '1rem',
-    marginTop: '1.5rem',
-  },
   emptyState: { textAlign: 'center', padding: '3rem 1rem', color: '#64748b' },
 };
 
-export default App
+export default App;
