@@ -102,7 +102,8 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 1. ~~**Push CI workflow**~~ — BLOCKED (attempts: 3). Token lacks `workflow` scope. File exists locally at `.github/workflows/ci.yml`. Needs manual push via GitHub web UI or token scope update by Jordan.
 2. ~~**Frontend**~~ ✅ Done — React dashboard with generate/decode/templates/history tabs
 3. ~~**Serve frontend from Rocket**~~ ✅ Done — FileServer + SPA fallback, single-port deployment
-4. **PDF output format** — mentioned in roadmap, not yet implemented
+4. **Instant start / auth UX** — currently asks for an API key without an obvious way to generate one (Jordan feedback 2026-02-08). Revisit auth model per DESIGN.md and make first-run experience zero-friction.
+5. **PDF output format** — mentioned in roadmap, not yet implemented
 5. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
 
 **Consider deployable?** ✅ **YES — fully deployable.** Core API is feature-complete: generate, decode, batch, templates, styles, tracked QR/short URLs, rate limiting with headers, OpenAPI spec, Docker support, React frontend served from the backend. Single port, single binary. README has setup instructions. Tests pass. Remaining items (PDF, logo overlay) are enhancements.

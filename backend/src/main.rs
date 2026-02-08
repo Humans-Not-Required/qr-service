@@ -16,17 +16,14 @@ use std::time::Duration;
 
 #[launch]
 fn rocket() -> _ {
-    // Load .env file if present (silently ignore if missing)
     let _ = dotenvy::dotenv();
 
-    // Rate limit window: default 60 seconds, configurable via RATE_LIMIT_WINDOW_SECS
     let window_secs: u64 = std::env::var("RATE_LIMIT_WINDOW_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(60);
     let limiter = rate_limit::RateLimiter::new(Duration::from_secs(window_secs));
 
-    // Frontend static files directory (default: ../frontend/dist relative to CWD)
     let static_dir: PathBuf = std::env::var("STATIC_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("../frontend/dist"));
@@ -49,26 +46,30 @@ fn rocket() -> _ {
             routes![
                 routes::health,
                 routes::openapi,
+                // Stateless QR (no auth)
                 routes::generate_qr,
                 routes::decode_qr,
                 routes::batch_generate,
                 routes::generate_from_template,
-                routes::get_history,
-                routes::get_qr_by_id,
-                routes::get_qr_image,
-                routes::delete_qr,
+                // Tracked QR (auth required)
                 routes::create_tracked_qr,
                 routes::list_tracked_qr,
                 routes::get_tracked_qr_stats,
                 routes::delete_tracked_qr,
+                // Admin key management
                 routes::list_keys,
                 routes::create_key,
                 routes::delete_key,
             ],
         )
-        .mount("/", routes![routes::redirect_short_url]);
+        .mount(
+            "/",
+            routes![
+                routes::redirect_short_url,
+                routes::view_qr,
+            ],
+        );
 
-    // Serve frontend static files if the directory exists
     if static_dir.is_dir() {
         println!("📦 Serving frontend from: {}", static_dir.display());
         build = build

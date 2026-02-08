@@ -4,6 +4,7 @@ use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
 use rocket::State;
 
+/// Authenticated API key (kept for tracked QR and admin routes).
 #[derive(Debug)]
 pub struct AuthenticatedKey {
     pub id: String,
@@ -27,7 +28,6 @@ impl<'r> FromRequest<'r> for AuthenticatedKey {
             _ => return Outcome::Error((Status::InternalServerError, "Rate limiter unavailable")),
         };
 
-        // Check Authorization header
         let key = match request.headers().get_one("Authorization") {
             Some(auth) => {
                 if let Some(key) = auth.strip_prefix("Bearer ") {
@@ -39,16 +39,15 @@ impl<'r> FromRequest<'r> for AuthenticatedKey {
                     ));
                 }
             }
-            None => {
-                // Also check X-API-Key header
-                match request.headers().get_one("X-API-Key") {
-                    Some(key) => key.to_string(),
-                    None => return Outcome::Error((
+            None => match request.headers().get_one("X-API-Key") {
+                Some(key) => key.to_string(),
+                None => {
+                    return Outcome::Error((
                         Status::Unauthorized,
                         "Missing API key. Use Authorization: Bearer YOUR_KEY or X-API-Key header",
-                    )),
+                    ))
                 }
-            }
+            },
         };
 
         let key_hash = hash_key(&key);
@@ -69,18 +68,13 @@ impl<'r> FromRequest<'r> for AuthenticatedKey {
             },
         ) {
             Ok((auth_key, rate_limit)) => {
-                // Update usage stats
                 let _ = conn.execute(
                     "UPDATE api_keys SET last_used_at = datetime('now'), requests_count = requests_count + 1 WHERE id = ?1",
                     rusqlite::params![auth_key.id],
                 );
-                // Must drop the DB lock before doing rate limit check
                 drop(conn);
 
-                // Enforce rate limit (per-key, fixed window)
                 let result = limiter.check(&auth_key.id, rate_limit as u64);
-
-                // Store rate limit info in request-local state for response headers
                 let _ = request.local_cache(|| Some(result.clone()));
 
                 if !result.allowed {
@@ -94,5 +88,33 @@ impl<'r> FromRequest<'r> for AuthenticatedKey {
             }
             Err(_) => Outcome::Error((Status::Unauthorized, "Invalid API key")),
         }
+    }
+}
+
+/// Extracts the client IP for IP-based rate limiting on public routes.
+#[derive(Debug)]
+pub struct ClientIp(pub String);
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for ClientIp {
+    type Error = std::convert::Infallible;
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        // Try X-Forwarded-For, X-Real-Ip, then socket addr
+        let ip = request
+            .headers()
+            .get_one("X-Forwarded-For")
+            .and_then(|v| v.split(',').next())
+            .map(|s| s.trim().to_string())
+            .or_else(|| {
+                request
+                    .headers()
+                    .get_one("X-Real-Ip")
+                    .map(|s| s.to_string())
+            })
+            .or_else(|| request.remote().map(|a| a.ip().to_string()))
+            .unwrap_or_else(|| "unknown".to_string());
+
+        Outcome::Success(ClientIp(ip))
     }
 }

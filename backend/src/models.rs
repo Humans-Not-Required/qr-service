@@ -88,12 +88,11 @@ pub enum TemplateRequest {
 
 #[derive(Debug, Serialize)]
 pub struct QrResponse {
-    pub id: String,
-    pub data: String,
+    pub image_base64: String,
+    pub share_url: String,
     pub format: String,
     pub size: u32,
-    pub image_base64: String,
-    pub created_at: String,
+    pub data: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -106,30 +105,6 @@ pub struct BatchQrResponse {
 pub struct DecodeResponse {
     pub data: String,
     pub format: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct QrHistoryItem {
-    pub id: String,
-    pub data: String,
-    pub format: String,
-    pub size: u32,
-    pub created_at: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct HistoryResponse {
-    pub items: Vec<QrHistoryItem>,
-    pub total: usize,
-    pub page: usize,
-    pub per_page: usize,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-pub struct HistoryParams {
-    pub page: Option<usize>,
-    pub per_page: Option<usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

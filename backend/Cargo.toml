@@ -29,6 +29,7 @@ rand = "0.8"
 tokio = { version = "1", features = ["full"] }
 rqrr = "0.8"
 dotenvy = "0.15"
+urlencoding = "2"
 
 [dev-dependencies]
 qrcode = "0.14"
