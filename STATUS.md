@@ -105,7 +105,7 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 4. ~~**Auth refactor phase 1**~~ ✅ Done (2026-02-08 11:45 UTC) — basic QR routes (generate/decode/batch/template) now stateless, no auth required. IP-based rate limiting. Stateless share URLs via `/qr/view?data=...`. Removed history/get/delete for basic QR. Response shape changed (share_url replaces id/created_at).
 5. ~~**Auth refactor phase 2**~~ ✅ Done (2026-02-08 13:10 UTC) — Per-resource manage_token for tracked QR. Removed global API keys, admin system, list_tracked_qr. ManageToken guard (Bearer/X-API-Key/?key=). Fresh DB required.
 6. ~~**Frontend update**~~ ✅ Done (2026-02-08 13:40 UTC) — Removed API key settings, History tab. Updated to use image_base64/share_url. Added Tracked QR tab with manage_token support.
-7. **Deploy to staging** — Push auth-refactored code to staging server (fresh DB needed).
+7. ~~**Deploy to staging**~~ ✅ Done (2026-02-08 14:07 UTC) — Fresh DB (old volume removed), auth-refactored code live. Added .dockerignore (context 481MB → 439KB).
 8. **PDF output format** — mentioned in roadmap, not yet implemented
 9. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
 
