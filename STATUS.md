@@ -1,6 +1,6 @@
 # QR Service - Status
 
-## Current State: MVP Backend ✅ + Style Rendering ✅ + Tracked QR / Short URLs ✅ + OpenAPI Complete ✅ + Rate Limiting ✅ + Rate Limit Headers ✅ + Frontend ✅ + Unified Serving ✅
+## Current State: Auth Refactor Phase 1 ✅ (Stateless QR) + MVP Backend ✅ + Style Rendering ✅ + Tracked QR / Short URLs ✅ + OpenAPI Complete ✅ + Rate Limiting ✅ + Rate Limit Headers ✅ + Frontend ✅ + Unified Serving ✅
 
 The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generation, decoding, raw image serving, styled rendering, tracked QR codes with scan analytics, and per-key rate limiting all work end-to-end. All clippy warnings resolved, all code formatted.
 
@@ -102,9 +102,12 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 1. ~~**Push CI workflow**~~ — BLOCKED (attempts: 3). Token lacks `workflow` scope. File exists locally at `.github/workflows/ci.yml`. Needs manual push via GitHub web UI or token scope update by Jordan.
 2. ~~**Frontend**~~ ✅ Done — React dashboard with generate/decode/templates/history tabs
 3. ~~**Serve frontend from Rocket**~~ ✅ Done — FileServer + SPA fallback, single-port deployment
-4. **Instant start / auth UX** — currently asks for an API key without an obvious way to generate one (Jordan feedback 2026-02-08). Revisit auth model per DESIGN.md and make first-run experience zero-friction.
-5. **PDF output format** — mentioned in roadmap, not yet implemented
-5. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
+4. ~~**Auth refactor phase 1**~~ ✅ Done (2026-02-08 11:45 UTC) — basic QR routes (generate/decode/batch/template) now stateless, no auth required. IP-based rate limiting. Stateless share URLs via `/qr/view?data=...`. Removed history/get/delete for basic QR. Response shape changed (share_url replaces id/created_at).
+5. **Auth refactor phase 2** — Tracked QR should use per-resource tokens (like kanban boards) instead of API keys. Remove global API key system entirely. Per DESIGN.md: `POST /qr/tracked` returns `{ manage_token }`, stats/delete use that token.
+6. **Frontend update** — Frontend still expects old API shape (API key prompt, history tab). Needs update for zero-auth flow + share URL display.
+7. **Deploy to staging** — Push auth-refactored code to staging server.
+8. **PDF output format** — mentioned in roadmap, not yet implemented
+9. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
 
 **Consider deployable?** ✅ **YES — fully deployable.** Core API is feature-complete: generate, decode, batch, templates, styles, tracked QR/short URLs, rate limiting with headers, OpenAPI spec, Docker support, React frontend served from the backend. Single port, single binary. README has setup instructions. Tests pass. Remaining items (PDF, logo overlay) are enhancements.
 
@@ -132,4 +135,4 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ---
 
-*Last updated: 2026-02-07 13:55 UTC — Session: Unified serving (backend serves frontend via FileServer + SPA fallback)*
+*Last updated: 2026-02-08 11:45 UTC — Session: Auth refactor phase 1 — stateless QR generation, IP-based rate limiting, share URLs. 25 tests passing, zero clippy warnings.*
