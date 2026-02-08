@@ -103,15 +103,15 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 2. ~~**Frontend**~~ ✅ Done — React dashboard with generate/decode/templates/history tabs
 3. ~~**Serve frontend from Rocket**~~ ✅ Done — FileServer + SPA fallback, single-port deployment
 4. ~~**Auth refactor phase 1**~~ ✅ Done (2026-02-08 11:45 UTC) — basic QR routes (generate/decode/batch/template) now stateless, no auth required. IP-based rate limiting. Stateless share URLs via `/qr/view?data=...`. Removed history/get/delete for basic QR. Response shape changed (share_url replaces id/created_at).
-5. **Auth refactor phase 2** — Tracked QR should use per-resource tokens (like kanban boards) instead of API keys. Remove global API key system entirely. Per DESIGN.md: `POST /qr/tracked` returns `{ manage_token }`, stats/delete use that token.
+5. ~~**Auth refactor phase 2**~~ ✅ Done (2026-02-08 13:10 UTC) — Per-resource manage_token for tracked QR. Removed global API keys, admin system, list_tracked_qr. ManageToken guard (Bearer/X-API-Key/?key=). Fresh DB required.
 6. **Frontend update** — Frontend still expects old API shape (API key prompt, history tab). Needs update for zero-auth flow + share URL display.
-7. **Deploy to staging** — Push auth-refactored code to staging server.
+7. **Deploy to staging** — Push auth-refactored code to staging server (fresh DB needed).
 8. **PDF output format** — mentioned in roadmap, not yet implemented
 9. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
 
 **Consider deployable?** ✅ **YES — fully deployable.** Core API is feature-complete: generate, decode, batch, templates, styles, tracked QR/short URLs, rate limiting with headers, OpenAPI spec, Docker support, React frontend served from the backend. Single port, single binary. README has setup instructions. Tests pass. Remaining items (PDF, logo overlay) are enhancements.
 
-**⚡ QR-SERVICE IS DONE. Next project: kanban.**
+**⚡ Auth refactor complete. Frontend update + deploy remaining.**
 
 ### ⚠️ Gotchas
 
