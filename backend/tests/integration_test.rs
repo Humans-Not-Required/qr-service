@@ -285,65 +285,32 @@ fn test_style_from_str() {
 
 // ============ Tracked QR / Short URL Tests ============
 
-/// Helper: create a test DB, insert an admin key, return (db, admin_key_string, admin_key_id)
-fn setup_test_db() -> (qr_service::db::DbPool, String, String) {
-    // Use a unique temp DB for each test
+/// Helper: create a test DB with new schema (no api_keys), return pool
+fn setup_test_db() -> qr_service::db::DbPool {
     let db_path = format!("/tmp/qr_test_{}.db", uuid::Uuid::new_v4());
     env::set_var("DATABASE_PATH", &db_path);
-    let pool = qr_service::db::init_db().expect("Failed to init test DB");
-
-    // Read the auto-created admin key from the DB
-    let conn = pool.lock().unwrap();
-    let (key_hash, key_id): (String, String) = conn
-        .query_row(
-            "SELECT key_hash, id FROM api_keys WHERE is_admin = 1 LIMIT 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .expect("No admin key found");
-
-    // We can't reverse the hash, so create a known key
-    let test_key = format!(
-        "qrs_test_{}",
-        uuid::Uuid::new_v4().to_string().replace("-", "")
-    );
-    let test_hash = qr_service::db::hash_key(&test_key);
-    let test_id = uuid::Uuid::new_v4().to_string();
-    conn.execute(
-        "INSERT INTO api_keys (id, name, key_hash, is_admin, rate_limit) VALUES (?1, 'Test Admin', ?2, 1, 10000)",
-        rusqlite::params![test_id, test_hash],
-    ).expect("Failed to insert test key");
-
-    drop(conn);
-
-    // Clean up the env var so it doesn't affect other tests
-    let _ = key_hash;
-    let _ = key_id;
-
-    (pool, test_key, test_id)
+    qr_service::db::init_db().expect("Failed to init test DB")
 }
 
 #[test]
 fn test_tracked_qr_db_roundtrip() {
-    // Test that we can insert and query tracked QR records directly via DB
-    let (pool, _key, key_id) = setup_test_db();
+    let pool = setup_test_db();
     let conn = pool.lock().unwrap();
 
-    // Create a QR code record first
     let qr_id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO qr_codes (id, api_key_id, data, format, size, image_data) VALUES (?1, ?2, 'http://localhost/r/test123', 'png', 256, X'89504E47')",
-        rusqlite::params![qr_id, key_id],
+        "INSERT INTO qr_codes (id, data, format, size, image_data) VALUES (?1, 'http://localhost/r/test123', 'png', 256, X'89504E47')",
+        rusqlite::params![qr_id],
     ).unwrap();
 
-    // Create tracked QR
     let tracked_id = uuid::Uuid::new_v4().to_string();
+    let manage_token = "qrt_test123";
+    let token_hash = qr_service::db::hash_token(manage_token);
     conn.execute(
-        "INSERT INTO tracked_qr (id, qr_id, short_code, target_url) VALUES (?1, ?2, 'test123', 'https://example.com')",
-        rusqlite::params![tracked_id, qr_id],
+        "INSERT INTO tracked_qr (id, qr_id, short_code, target_url, manage_token_hash) VALUES (?1, ?2, 'test123', 'https://example.com', ?3)",
+        rusqlite::params![tracked_id, qr_id, token_hash],
     ).unwrap();
 
-    // Verify we can query it
     let (found_code, found_url): (String, String) = conn
         .query_row(
             "SELECT short_code, target_url FROM tracked_qr WHERE id = ?1",
@@ -355,6 +322,16 @@ fn test_tracked_qr_db_roundtrip() {
     assert_eq!(found_code, "test123");
     assert_eq!(found_url, "https://example.com");
 
+    // Verify token-based lookup works
+    let found_id: String = conn
+        .query_row(
+            "SELECT id FROM tracked_qr WHERE id = ?1 AND manage_token_hash = ?2",
+            rusqlite::params![tracked_id, token_hash],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(found_id, tracked_id);
+
     // Insert a scan event
     let scan_id = uuid::Uuid::new_v4().to_string();
     conn.execute(
@@ -362,23 +339,16 @@ fn test_tracked_qr_db_roundtrip() {
         rusqlite::params![scan_id, tracked_id],
     ).unwrap();
 
-    // Verify scan count update
     conn.execute(
         "UPDATE tracked_qr SET scan_count = scan_count + 1 WHERE id = ?1",
         rusqlite::params![tracked_id],
-    )
-    .unwrap();
+    ).unwrap();
 
     let scan_count: i64 = conn
-        .query_row(
-            "SELECT scan_count FROM tracked_qr WHERE id = ?1",
-            rusqlite::params![tracked_id],
-            |row| row.get(0),
-        )
+        .query_row("SELECT scan_count FROM tracked_qr WHERE id = ?1", rusqlite::params![tracked_id], |row| row.get(0))
         .unwrap();
     assert_eq!(scan_count, 1);
 
-    // Verify scan event
     let (found_ua, found_ref): (Option<String>, Option<String>) = conn
         .query_row(
             "SELECT user_agent, referrer FROM scan_events WHERE tracked_qr_id = ?1",
@@ -392,140 +362,111 @@ fn test_tracked_qr_db_roundtrip() {
 
 #[test]
 fn test_tracked_qr_short_code_uniqueness() {
-    // Test that short codes must be unique
-    let (pool, _key, key_id) = setup_test_db();
+    let pool = setup_test_db();
     let conn = pool.lock().unwrap();
 
     let qr_id1 = uuid::Uuid::new_v4().to_string();
     let qr_id2 = uuid::Uuid::new_v4().to_string();
+    let hash = qr_service::db::hash_token("token1");
     conn.execute(
-        "INSERT INTO qr_codes (id, api_key_id, data, format, size, image_data) VALUES (?1, ?2, 'data1', 'png', 256, X'89504E47')",
-        rusqlite::params![qr_id1, key_id],
+        "INSERT INTO qr_codes (id, data, format, size, image_data) VALUES (?1, 'data1', 'png', 256, X'89504E47')",
+        rusqlite::params![qr_id1],
     ).unwrap();
     conn.execute(
-        "INSERT INTO qr_codes (id, api_key_id, data, format, size, image_data) VALUES (?1, ?2, 'data2', 'png', 256, X'89504E47')",
-        rusqlite::params![qr_id2, key_id],
+        "INSERT INTO qr_codes (id, data, format, size, image_data) VALUES (?1, 'data2', 'png', 256, X'89504E47')",
+        rusqlite::params![qr_id2],
     ).unwrap();
 
     let tracked1 = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO tracked_qr (id, qr_id, short_code, target_url) VALUES (?1, ?2, 'unique1', 'https://example.com')",
-        rusqlite::params![tracked1, qr_id1],
+        "INSERT INTO tracked_qr (id, qr_id, short_code, target_url, manage_token_hash) VALUES (?1, ?2, 'unique1', 'https://example.com', ?3)",
+        rusqlite::params![tracked1, qr_id1, hash],
     ).unwrap();
 
-    // Second insert with same short_code should fail
     let tracked2 = uuid::Uuid::new_v4().to_string();
     let result = conn.execute(
-        "INSERT INTO tracked_qr (id, qr_id, short_code, target_url) VALUES (?1, ?2, 'unique1', 'https://other.com')",
-        rusqlite::params![tracked2, qr_id2],
+        "INSERT INTO tracked_qr (id, qr_id, short_code, target_url, manage_token_hash) VALUES (?1, ?2, 'unique1', 'https://other.com', ?3)",
+        rusqlite::params![tracked2, qr_id2, hash],
     );
-    assert!(
-        result.is_err(),
-        "Duplicate short_code should be rejected by UNIQUE constraint"
-    );
+    assert!(result.is_err(), "Duplicate short_code should be rejected by UNIQUE constraint");
 }
 
 #[test]
 fn test_tracked_qr_cascade_delete() {
-    // Test that deleting tracked QR also allows deleting scan events
-    let (pool, _key, key_id) = setup_test_db();
+    let pool = setup_test_db();
     let conn = pool.lock().unwrap();
 
     let qr_id = uuid::Uuid::new_v4().to_string();
+    let hash = qr_service::db::hash_token("token_del");
     conn.execute(
-        "INSERT INTO qr_codes (id, api_key_id, data, format, size, image_data) VALUES (?1, ?2, 'data', 'png', 256, X'89504E47')",
-        rusqlite::params![qr_id, key_id],
+        "INSERT INTO qr_codes (id, data, format, size, image_data) VALUES (?1, 'data', 'png', 256, X'89504E47')",
+        rusqlite::params![qr_id],
     ).unwrap();
 
     let tracked_id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO tracked_qr (id, qr_id, short_code, target_url) VALUES (?1, ?2, 'del_test', 'https://example.com')",
-        rusqlite::params![tracked_id, qr_id],
+        "INSERT INTO tracked_qr (id, qr_id, short_code, target_url, manage_token_hash) VALUES (?1, ?2, 'del_test', 'https://example.com', ?3)",
+        rusqlite::params![tracked_id, qr_id, hash],
     ).unwrap();
 
-    // Add some scan events
     for i in 0..5 {
         let scan_id = uuid::Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO scan_events (id, tracked_qr_id, user_agent) VALUES (?1, ?2, ?3)",
             rusqlite::params![scan_id, tracked_id, format!("Agent/{}", i)],
-        )
-        .unwrap();
+        ).unwrap();
     }
 
-    // Verify 5 events exist
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM scan_events WHERE tracked_qr_id = ?1",
-            rusqlite::params![tracked_id],
-            |row| row.get(0),
-        )
-        .unwrap();
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM scan_events WHERE tracked_qr_id = ?1",
+        rusqlite::params![tracked_id], |row| row.get(0),
+    ).unwrap();
     assert_eq!(count, 5);
 
-    // Delete events first, then tracked record (mirroring route logic)
-    conn.execute(
-        "DELETE FROM scan_events WHERE tracked_qr_id = ?1",
-        rusqlite::params![tracked_id],
-    )
-    .unwrap();
-    conn.execute(
-        "DELETE FROM tracked_qr WHERE id = ?1",
-        rusqlite::params![tracked_id],
-    )
-    .unwrap();
+    conn.execute("DELETE FROM scan_events WHERE tracked_qr_id = ?1", rusqlite::params![tracked_id]).unwrap();
+    conn.execute("DELETE FROM tracked_qr WHERE id = ?1", rusqlite::params![tracked_id]).unwrap();
 
-    // Verify cleanup
-    let remaining: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM scan_events WHERE tracked_qr_id = ?1",
-            rusqlite::params![tracked_id],
-            |row| row.get(0),
-        )
-        .unwrap();
+    let remaining: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM scan_events WHERE tracked_qr_id = ?1",
+        rusqlite::params![tracked_id], |row| row.get(0),
+    ).unwrap();
     assert_eq!(remaining, 0);
-
-    let tracked_remaining: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM tracked_qr WHERE id = ?1",
-            rusqlite::params![tracked_id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(tracked_remaining, 0);
 }
 
 #[test]
 fn test_tracked_qr_expiry_check() {
-    // Test expiry logic: an expired tracked QR should be detectable
-    let (pool, _key, key_id) = setup_test_db();
+    let pool = setup_test_db();
     let conn = pool.lock().unwrap();
 
     let qr_id = uuid::Uuid::new_v4().to_string();
+    let hash = qr_service::db::hash_token("token_exp");
     conn.execute(
-        "INSERT INTO qr_codes (id, api_key_id, data, format, size, image_data) VALUES (?1, ?2, 'data', 'png', 256, X'89504E47')",
-        rusqlite::params![qr_id, key_id],
+        "INSERT INTO qr_codes (id, data, format, size, image_data) VALUES (?1, 'data', 'png', 256, X'89504E47')",
+        rusqlite::params![qr_id],
     ).unwrap();
 
-    // Create with past expiry
     let tracked_id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO tracked_qr (id, qr_id, short_code, target_url, expires_at) VALUES (?1, ?2, 'expired1', 'https://example.com', '2020-01-01 00:00:00')",
-        rusqlite::params![tracked_id, qr_id],
+        "INSERT INTO tracked_qr (id, qr_id, short_code, target_url, manage_token_hash, expires_at) VALUES (?1, ?2, 'expired1', 'https://example.com', ?3, '2020-01-01 00:00:00')",
+        rusqlite::params![tracked_id, qr_id, hash],
     ).unwrap();
 
-    // Read it back and check expiry
     let expires_at: Option<String> = conn
-        .query_row(
-            "SELECT expires_at FROM tracked_qr WHERE id = ?1",
-            rusqlite::params![tracked_id],
-            |row| row.get(0),
-        )
+        .query_row("SELECT expires_at FROM tracked_qr WHERE id = ?1", rusqlite::params![tracked_id], |row| row.get(0))
         .unwrap();
 
     let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    assert!(
-        expires_at.unwrap() < now,
-        "Expired link should have past timestamp"
-    );
+    assert!(expires_at.unwrap() < now, "Expired link should have past timestamp");
+}
+
+#[test]
+fn test_manage_token_hash() {
+    // Verify hash_token is deterministic
+    let token = "qrt_abc123";
+    let h1 = qr_service::db::hash_token(token);
+    let h2 = qr_service::db::hash_token(token);
+    assert_eq!(h1, h2);
+    // Different token = different hash
+    let h3 = qr_service::db::hash_token("qrt_different");
+    assert_ne!(h1, h3);
 }

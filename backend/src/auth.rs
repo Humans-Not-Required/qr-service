@@ -1,93 +1,45 @@
-use crate::db::{hash_key, DbPool};
-use crate::rate_limit::RateLimiter;
 use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
-use rocket::State;
 
-/// Authenticated API key (kept for tracked QR and admin routes).
+/// Extracts a manage token from Bearer header, X-API-Key header, or ?key= query param.
+/// Used for tracked QR management routes (stats, delete).
 #[derive(Debug)]
-pub struct AuthenticatedKey {
-    pub id: String,
-    #[allow(dead_code)]
-    pub name: String,
-    pub is_admin: bool,
-}
+pub struct ManageToken(pub String);
 
 #[rocket::async_trait]
-impl<'r> FromRequest<'r> for AuthenticatedKey {
+impl<'r> FromRequest<'r> for ManageToken {
     type Error = &'static str;
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-        let db = match request.guard::<&State<DbPool>>().await {
-            Outcome::Success(db) => db,
-            _ => return Outcome::Error((Status::InternalServerError, "Database unavailable")),
-        };
-
-        let limiter = match request.guard::<&State<RateLimiter>>().await {
-            Outcome::Success(l) => l,
-            _ => return Outcome::Error((Status::InternalServerError, "Rate limiter unavailable")),
-        };
-
-        let key = match request.headers().get_one("Authorization") {
-            Some(auth) => {
-                if let Some(key) = auth.strip_prefix("Bearer ") {
-                    key.to_string()
-                } else {
-                    return Outcome::Error((
-                        Status::Unauthorized,
-                        "Invalid authorization format. Use: Bearer YOUR_API_KEY",
-                    ));
-                }
+        // Try Authorization: Bearer <token>
+        if let Some(auth) = request.headers().get_one("Authorization") {
+            if let Some(token) = auth.strip_prefix("Bearer ") {
+                return Outcome::Success(ManageToken(token.to_string()));
             }
-            None => match request.headers().get_one("X-API-Key") {
-                Some(key) => key.to_string(),
-                None => {
-                    return Outcome::Error((
-                        Status::Unauthorized,
-                        "Missing API key. Use Authorization: Bearer YOUR_KEY or X-API-Key header",
-                    ))
-                }
-            },
-        };
-
-        let key_hash = hash_key(&key);
-        let conn = db.lock().unwrap();
-
-        match conn.query_row(
-            "SELECT id, name, is_admin, rate_limit FROM api_keys WHERE key_hash = ?1 AND active = 1",
-            rusqlite::params![key_hash],
-            |row| {
-                Ok((
-                    AuthenticatedKey {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        is_admin: row.get::<_, i32>(2)? == 1,
-                    },
-                    row.get::<_, i64>(3)?,
-                ))
-            },
-        ) {
-            Ok((auth_key, rate_limit)) => {
-                let _ = conn.execute(
-                    "UPDATE api_keys SET last_used_at = datetime('now'), requests_count = requests_count + 1 WHERE id = ?1",
-                    rusqlite::params![auth_key.id],
-                );
-                drop(conn);
-
-                let result = limiter.check(&auth_key.id, rate_limit as u64);
-                let _ = request.local_cache(|| Some(result.clone()));
-
-                if !result.allowed {
-                    return Outcome::Error((
-                        Status::TooManyRequests,
-                        "Rate limit exceeded. Try again later.",
-                    ));
-                }
-
-                Outcome::Success(auth_key)
-            }
-            Err(_) => Outcome::Error((Status::Unauthorized, "Invalid API key")),
+            return Outcome::Error((
+                Status::Unauthorized,
+                "Invalid authorization format. Use: Bearer YOUR_TOKEN",
+            ));
         }
+
+        // Try X-API-Key header
+        if let Some(token) = request.headers().get_one("X-API-Key") {
+            return Outcome::Success(ManageToken(token.to_string()));
+        }
+
+        // Try ?key= query param
+        if let Some(query) = request.uri().query() {
+            for seg in query.segments() {
+                if seg.0 == "key" {
+                    return Outcome::Success(ManageToken(seg.1.to_string()));
+                }
+            }
+        }
+
+        Outcome::Error((
+            Status::Unauthorized,
+            "Missing manage token. Use Authorization: Bearer TOKEN, X-API-Key header, or ?key= query param",
+        ))
     }
 }
 
@@ -100,7 +52,6 @@ impl<'r> FromRequest<'r> for ClientIp {
     type Error = std::convert::Infallible;
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-        // Try X-Forwarded-For, X-Real-Ip, then socket addr
         let ip = request
             .headers()
             .get_one("X-Forwarded-For")

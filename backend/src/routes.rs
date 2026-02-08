@@ -6,8 +6,8 @@ use rocket::serde::json::Json;
 use rocket::State;
 use std::path::PathBuf;
 
-use crate::auth::{AuthenticatedKey, ClientIp};
-use crate::db::{hash_key, DbPool};
+use crate::auth::{ClientIp, ManageToken};
+use crate::db::{hash_token, DbPool};
 use crate::models::*;
 use crate::qr;
 use crate::rate_limit::RateLimiter;
@@ -419,14 +419,28 @@ pub fn view_qr(
     }
 }
 
-// ============ Tracked QR / Short URLs (Auth Required) ============
+// ============ Tracked QR / Short URLs (Per-Resource Token Auth) ============
+
+/// Rate limit for tracked QR creation (per IP)
+const TRACKED_CREATE_RATE_LIMIT: u64 = 20;
 
 #[post("/qr/tracked", format = "json", data = "<req>")]
 pub fn create_tracked_qr(
     req: Json<CreateTrackedQrRequest>,
-    key: AuthenticatedKey,
+    ip: ClientIp,
+    limiter: &State<RateLimiter>,
     db: &State<DbPool>,
 ) -> Result<Json<TrackedQrResponse>, (Status, Json<ApiError>)> {
+    // IP-based rate limit for creation
+    let key = format!("ip:tracked:{}", ip.0);
+    let result = limiter.check(&key, TRACKED_CREATE_RATE_LIMIT);
+    if !result.allowed {
+        return Err((Status::TooManyRequests, Json(ApiError {
+            error: "Rate limit exceeded for tracked QR creation. Try again later.".to_string(),
+            code: "RATE_LIMIT_EXCEEDED".to_string(), status: 429,
+        })));
+    }
+
     let req = req.into_inner();
 
     if req.target_url.is_empty() {
@@ -509,21 +523,23 @@ pub fn create_tracked_qr(
 
     let qr_id = uuid::Uuid::new_v4().to_string();
     let tracked_id = uuid::Uuid::new_v4().to_string();
+    let manage_token = format!("qrt_{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
+    let manage_token_hash_val = hash_token(&manage_token);
     let image_base64 = format!("data:{};base64,{}", content_type, BASE64.encode(&image_data));
 
     let conn = db.lock().unwrap();
 
     conn.execute(
-        "INSERT INTO qr_codes (id, api_key_id, data, format, size, fg_color, bg_color, error_correction, style, image_data) 
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        rusqlite::params![qr_id, key.id, short_url, req.format, req.size, req.fg_color, req.bg_color, req.error_correction, req.style, image_data],
+        "INSERT INTO qr_codes (id, data, format, size, fg_color, bg_color, error_correction, style, image_data) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![qr_id, short_url, req.format, req.size, req.fg_color, req.bg_color, req.error_correction, req.style, image_data],
     ).map_err(|e| {
         (Status::InternalServerError, Json(ApiError { error: format!("Failed to store QR code: {}", e), code: "DB_ERROR".to_string(), status: 500 }))
     })?;
 
     conn.execute(
-        "INSERT INTO tracked_qr (id, qr_id, short_code, target_url, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![tracked_id, qr_id, short_code, req.target_url, req.expires_at],
+        "INSERT INTO tracked_qr (id, qr_id, short_code, target_url, manage_token_hash, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![tracked_id, qr_id, short_code, req.target_url, manage_token_hash_val, req.expires_at],
     ).map_err(|e| {
         (Status::InternalServerError, Json(ApiError { error: format!("Failed to create tracked QR: {}", e), code: "DB_ERROR".to_string(), status: 500 }))
     })?;
@@ -532,15 +548,19 @@ pub fn create_tracked_qr(
         .query_row("SELECT created_at FROM tracked_qr WHERE id = ?1", rusqlite::params![tracked_id], |row| row.get::<_, String>(0))
         .unwrap_or_else(|_| chrono::Utc::now().to_rfc3339());
 
+    let manage_url = format!("{}/api/v1/qr/tracked/{}?key={}", base_url.trim_end_matches('/'), tracked_id, manage_token);
+
     Ok(Json(TrackedQrResponse {
         id: tracked_id,
         qr_id: qr_id.clone(),
         short_code,
         short_url: short_url.clone(),
         target_url: req.target_url,
+        manage_token,
+        manage_url,
         scan_count: 0,
         expires_at: req.expires_at,
-        created_at: created_at.clone(),
+        created_at,
         qr: QrResponse {
             image_base64,
             share_url: short_url,
@@ -551,62 +571,23 @@ pub fn create_tracked_qr(
     }))
 }
 
-#[get("/qr/tracked?<page>&<per_page>")]
-pub fn list_tracked_qr(
-    page: Option<usize>,
-    per_page: Option<usize>,
-    key: AuthenticatedKey,
-    db: &State<DbPool>,
-) -> Result<Json<TrackedQrListResponse>, (Status, Json<ApiError>)> {
-    let page = page.unwrap_or(1).max(1);
-    let per_page = per_page.unwrap_or(20).clamp(1, 100);
-    let offset = (page - 1) * per_page;
-
-    let conn = db.lock().unwrap();
-    let total: usize = conn
-        .query_row(
-            "SELECT COUNT(*) FROM tracked_qr t JOIN qr_codes q ON t.qr_id = q.id WHERE q.api_key_id = ?1",
-            rusqlite::params![key.id], |row| row.get(0),
-        )
-        .unwrap_or(0);
-
-    let mut stmt = conn.prepare(
-        "SELECT t.id, t.short_code, t.target_url, t.scan_count, t.expires_at, t.created_at 
-         FROM tracked_qr t JOIN qr_codes q ON t.qr_id = q.id 
-         WHERE q.api_key_id = ?1 ORDER BY t.created_at DESC LIMIT ?2 OFFSET ?3",
-    ).map_err(|e| {
-        (Status::InternalServerError, Json(ApiError { error: format!("Database error: {}", e), code: "DB_ERROR".to_string(), status: 500 }))
-    })?;
-
-    let items = stmt.query_map(rusqlite::params![key.id, per_page as i64, offset as i64], |row| {
-        Ok(TrackedQrListItem {
-            id: row.get(0)?, short_code: row.get(1)?, target_url: row.get(2)?,
-            scan_count: row.get(3)?, expires_at: row.get(4)?, created_at: row.get(5)?,
-        })
-    }).map_err(|e| {
-        (Status::InternalServerError, Json(ApiError { error: format!("Query error: {}", e), code: "DB_ERROR".to_string(), status: 500 }))
-    })?.filter_map(|r| r.ok()).collect();
-
-    Ok(Json(TrackedQrListResponse { items, total }))
-}
-
 #[get("/qr/tracked/<id>/stats")]
 pub fn get_tracked_qr_stats(
     id: &str,
-    key: AuthenticatedKey,
+    token: ManageToken,
     db: &State<DbPool>,
 ) -> Result<Json<TrackedQrStatsResponse>, (Status, Json<ApiError>)> {
     let conn = db.lock().unwrap();
+    let token_hash = hash_token(&token.0);
 
     let tracked = conn.query_row(
-        "SELECT t.id, t.short_code, t.target_url, t.scan_count, t.expires_at, t.created_at 
-         FROM tracked_qr t JOIN qr_codes q ON t.qr_id = q.id 
-         WHERE t.id = ?1 AND q.api_key_id = ?2",
-        rusqlite::params![id, key.id],
+        "SELECT id, short_code, target_url, scan_count, expires_at, created_at 
+         FROM tracked_qr WHERE id = ?1 AND manage_token_hash = ?2",
+        rusqlite::params![id, token_hash],
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
                    row.get::<_, i64>(3)?, row.get::<_, Option<String>>(4)?, row.get::<_, String>(5)?)),
     ).map_err(|_| {
-        (Status::NotFound, Json(ApiError { error: "Tracked QR code not found".to_string(), code: "NOT_FOUND".to_string(), status: 404 }))
+        (Status::NotFound, Json(ApiError { error: "Tracked QR code not found or invalid token".to_string(), code: "NOT_FOUND".to_string(), status: 404 }))
     })?;
 
     let mut stmt = conn.prepare(
@@ -630,16 +611,17 @@ pub fn get_tracked_qr_stats(
 #[delete("/qr/tracked/<id>")]
 pub fn delete_tracked_qr(
     id: &str,
-    key: AuthenticatedKey,
+    token: ManageToken,
     db: &State<DbPool>,
 ) -> Result<Json<serde_json::Value>, (Status, Json<ApiError>)> {
     let conn = db.lock().unwrap();
+    let token_hash = hash_token(&token.0);
 
     let qr_id: String = conn.query_row(
-        "SELECT t.qr_id FROM tracked_qr t JOIN qr_codes q ON t.qr_id = q.id WHERE t.id = ?1 AND q.api_key_id = ?2",
-        rusqlite::params![id, key.id], |row| row.get(0),
+        "SELECT qr_id FROM tracked_qr WHERE id = ?1 AND manage_token_hash = ?2",
+        rusqlite::params![id, token_hash], |row| row.get(0),
     ).map_err(|_| {
-        (Status::NotFound, Json(ApiError { error: "Tracked QR code not found".to_string(), code: "NOT_FOUND".to_string(), status: 404 }))
+        (Status::NotFound, Json(ApiError { error: "Tracked QR code not found or invalid token".to_string(), code: "NOT_FOUND".to_string(), status: 404 }))
     })?;
 
     conn.execute("DELETE FROM scan_events WHERE tracked_qr_id = ?1", rusqlite::params![id]).unwrap_or(0);
@@ -647,86 +629,6 @@ pub fn delete_tracked_qr(
     conn.execute("DELETE FROM qr_codes WHERE id = ?1", rusqlite::params![qr_id]).unwrap_or(0);
 
     Ok(Json(serde_json::json!({"deleted": true, "id": id})))
-}
-
-// ============ API Keys (Admin) ============
-
-#[get("/keys")]
-pub fn list_keys(
-    key: AuthenticatedKey,
-    db: &State<DbPool>,
-) -> Result<Json<Vec<KeyResponse>>, (Status, Json<ApiError>)> {
-    if !key.is_admin {
-        return Err((Status::Forbidden, Json(ApiError { error: "Admin access required".to_string(), code: "FORBIDDEN".to_string(), status: 403 })));
-    }
-
-    let conn = db.lock().unwrap();
-    let mut stmt = conn.prepare(
-        "SELECT id, name, created_at, last_used_at, requests_count, rate_limit, active FROM api_keys ORDER BY created_at DESC"
-    ).map_err(|e| {
-        (Status::InternalServerError, Json(ApiError { error: format!("Database error: {}", e), code: "DB_ERROR".to_string(), status: 500 }))
-    })?;
-
-    let keys = stmt.query_map([], |row| {
-        Ok(KeyResponse {
-            id: row.get(0)?, name: row.get(1)?, key: None, created_at: row.get(2)?,
-            last_used_at: row.get(3)?, requests_count: row.get(4)?, rate_limit: row.get(5)?,
-            active: row.get::<_, i32>(6)? == 1,
-        })
-    }).map_err(|e| {
-        (Status::InternalServerError, Json(ApiError { error: format!("Query error: {}", e), code: "DB_ERROR".to_string(), status: 500 }))
-    })?.filter_map(|r| r.ok()).collect();
-
-    Ok(Json(keys))
-}
-
-#[post("/keys", format = "json", data = "<req>")]
-pub fn create_key(
-    req: Json<CreateKeyRequest>,
-    key: AuthenticatedKey,
-    db: &State<DbPool>,
-) -> Result<Json<KeyResponse>, (Status, Json<ApiError>)> {
-    if !key.is_admin {
-        return Err((Status::Forbidden, Json(ApiError { error: "Admin access required".to_string(), code: "FORBIDDEN".to_string(), status: 403 })));
-    }
-
-    let req = req.into_inner();
-    let new_key = format!("qrs_{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
-    let key_hash_val = hash_key(&new_key);
-    let id = uuid::Uuid::new_v4().to_string();
-
-    let conn = db.lock().unwrap();
-    conn.execute(
-        "INSERT INTO api_keys (id, name, key_hash, rate_limit) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![id, req.name, key_hash_val, req.rate_limit],
-    ).map_err(|e| {
-        (Status::InternalServerError, Json(ApiError { error: format!("Failed to create key: {}", e), code: "DB_ERROR".to_string(), status: 500 }))
-    })?;
-
-    Ok(Json(KeyResponse {
-        id, name: req.name, key: Some(new_key), created_at: chrono::Utc::now().to_rfc3339(),
-        last_used_at: None, requests_count: 0, rate_limit: req.rate_limit, active: true,
-    }))
-}
-
-#[delete("/keys/<id>")]
-pub fn delete_key(
-    id: &str,
-    key: AuthenticatedKey,
-    db: &State<DbPool>,
-) -> Result<Json<serde_json::Value>, (Status, Json<ApiError>)> {
-    if !key.is_admin {
-        return Err((Status::Forbidden, Json(ApiError { error: "Admin access required".to_string(), code: "FORBIDDEN".to_string(), status: 403 })));
-    }
-
-    let conn = db.lock().unwrap();
-    let affected = conn.execute("UPDATE api_keys SET active = 0 WHERE id = ?1", rusqlite::params![id]).unwrap_or(0);
-
-    if affected > 0 {
-        Ok(Json(serde_json::json!({"revoked": true, "id": id})))
-    } else {
-        Err((Status::NotFound, Json(ApiError { error: "API key not found".to_string(), code: "NOT_FOUND".to_string(), status: 404 })))
-    }
 }
 
 // ============ Short URL Redirect ============

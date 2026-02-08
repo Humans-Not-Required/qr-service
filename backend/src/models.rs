@@ -107,25 +107,6 @@ pub struct DecodeResponse {
     pub format: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateKeyRequest {
-    pub name: String,
-    #[serde(default = "default_rate_limit")]
-    pub rate_limit: i64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct KeyResponse {
-    pub id: String,
-    pub name: String,
-    pub key: Option<String>, // Only returned on creation
-    pub created_at: String,
-    pub last_used_at: Option<String>,
-    pub requests_count: i64,
-    pub rate_limit: i64,
-    pub active: bool,
-}
-
 #[derive(Debug, Serialize)]
 pub struct ApiError {
     pub error: String,
@@ -162,10 +143,6 @@ fn default_style() -> String {
 fn default_wifi_encryption() -> String {
     "WPA2".to_string()
 }
-fn default_rate_limit() -> i64 {
-    100
-}
-
 // ============ Tracked QR / Short URLs ============
 
 #[derive(Debug, Deserialize)]
@@ -196,6 +173,8 @@ pub struct TrackedQrResponse {
     pub short_code: String,
     pub short_url: String,
     pub target_url: String,
+    pub manage_token: String,
+    pub manage_url: String,
     pub scan_count: i64,
     pub expires_at: Option<String>,
     pub created_at: String,
@@ -221,18 +200,4 @@ pub struct TrackedQrStatsResponse {
     pub recent_scans: Vec<ScanEventResponse>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct TrackedQrListItem {
-    pub id: String,
-    pub short_code: String,
-    pub target_url: String,
-    pub scan_count: i64,
-    pub expires_at: Option<String>,
-    pub created_at: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TrackedQrListResponse {
-    pub items: Vec<TrackedQrListItem>,
-    pub total: usize,
-}
+// List response removed — no global listing without per-resource tokens

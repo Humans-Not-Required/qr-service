@@ -51,15 +51,10 @@ fn rocket() -> _ {
                 routes::decode_qr,
                 routes::batch_generate,
                 routes::generate_from_template,
-                // Tracked QR (auth required)
+                // Tracked QR (per-resource token auth)
                 routes::create_tracked_qr,
-                routes::list_tracked_qr,
                 routes::get_tracked_qr_stats,
                 routes::delete_tracked_qr,
-                // Admin key management
-                routes::list_keys,
-                routes::create_key,
-                routes::delete_key,
             ],
         )
         .mount(
