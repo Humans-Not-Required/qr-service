@@ -140,4 +140,8 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 - ~~**QR analytics dashboard**~~ ✅ — Tracked tab redesigned with 3 sub-views: Dashboard (stat cards for total QR codes/scans/avg, all tracked QR codes with horizontal bar chart showing relative scan volume, expandable detail panel with recent scans/target/expiry), Create (tracked QR creation with manage token display), Import (add existing tracked QR by ID + manage token). localStorage persistence for tracked QR codes and manage tokens across sessions. Auto-loads stats on mount. Per-item refresh. Commit: cc2a4ec
 
-*Last updated: 2026-02-09 13:09 UTC — QR analytics dashboard. 23 tests passing, zero clippy warnings.*
+### Completed (2026-02-09 Overnight — 15:25 UTC)
+
+- **llms.txt endpoint** ✅ — `/api/v1/llms.txt` and `/llms.txt` (root level) for AI agent API discovery. Documents all endpoints, auth model, quick start guide. Consistent with other HNR services. Commit: ac6c0d7
+
+*Last updated: 2026-02-09 15:25 UTC — llms.txt endpoint. 23 tests passing, zero clippy warnings.*
