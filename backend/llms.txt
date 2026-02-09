@@ -1,0 +1,42 @@
+# QR Service API
+> Generate, decode, and track QR codes. Agent-first with zero signup.
+
+## Base URL
+/api/v1
+
+## Quick Start
+1. Generate QR: POST /api/v1/qr/generate {"content": "https://example.com"}
+2. Decode QR: POST /api/v1/qr/decode (multipart, file=image)
+3. Tracked QR: POST /api/v1/qr/tracked {"target_url": "...", "name": "..."}
+   - Returns manage_token + short URL with scan analytics
+
+## Endpoints
+
+### Stateless QR (no auth)
+- POST /qr/generate — generate QR code (PNG/SVG, styles: square/rounded/dots)
+- POST /qr/decode — decode QR from image
+- POST /qr/batch — batch generate (up to 50)
+- POST /qr/template/{type} — generate from template (wifi/vcard/url)
+
+### Tracked QR (auth required)
+- POST /qr/tracked — create tracked QR with short URL (returns manage_token)
+- GET /qr/tracked/{id}/stats — scan analytics
+- DELETE /qr/tracked/{id} — delete tracked QR
+
+### Short URLs
+- GET /r/{code} — redirect (records scan event)
+
+### Utility
+- GET /health — health check
+- GET /openapi.json — OpenAPI 3.0 spec
+- GET /qr/view?data=... — stateless QR image viewer
+
+## Auth
+Tracked QR: Bearer token or X-API-Key header (manage_token from create)
+Stateless QR: no auth required
+
+## OpenAPI
+Full spec: GET /api/v1/openapi.json
+
+## Source
+https://github.com/Humans-Not-Required/qr-service

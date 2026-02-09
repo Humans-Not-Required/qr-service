@@ -46,6 +46,7 @@ fn rocket() -> _ {
             routes![
                 routes::health,
                 routes::openapi,
+                routes::llms_txt,
                 // Stateless QR (no auth)
                 routes::generate_qr,
                 routes::decode_qr,
@@ -62,6 +63,7 @@ fn rocket() -> _ {
             routes![
                 routes::redirect_short_url,
                 routes::view_qr,
+                routes::root_llms_txt,
             ],
         );
 
