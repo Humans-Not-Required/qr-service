@@ -8,9 +8,8 @@ use rocket::{Request, Response};
 
 /// Fixed-window rate limiter.
 ///
-/// Each API key gets a counter that resets every `window` duration.
-/// The per-key limit is stored in the database (`api_keys.rate_limit`),
-/// so callers pass it in when checking.
+/// Each key (e.g. IP address) gets a counter that resets every `window` duration.
+/// Callers pass in the per-key limit when checking.
 pub struct RateLimiter {
     window: Duration,
     /// key_id → (window_start, count)
