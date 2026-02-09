@@ -144,4 +144,8 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 - **llms.txt endpoint** ✅ — `/api/v1/llms.txt` and `/llms.txt` (root level) for AI agent API discovery. Documents all endpoints, auth model, quick start guide. Consistent with other HNR services. Commit: ac6c0d7
 
-*Last updated: 2026-02-09 15:25 UTC — llms.txt endpoint. 23 tests passing, zero clippy warnings.*
+### Completed (2026-02-09 Daytime Session 8 — 22:15 UTC)
+
+- **33 HTTP integration tests** ✅ — Full Rocket test client coverage: health/openapi/llms.txt, stateless QR generation (PNG/SVG/colors/styles), input validation (empty data, invalid size/format), decode roundtrip, batch + template endpoints (wifi/vcard/url), stateless share URL view, tracked QR lifecycle (create/stats/delete), per-resource token auth guards (valid/wrong/missing), short URL redirect, rate limiting. Also fixed stale `api_keys` comment in rate_limit.rs. Commit: 10111ef
+
+*Last updated: 2026-02-09 22:15 UTC — 33 HTTP tests added. 59 tests total (3 unit + 33 HTTP + 23 integration), zero clippy warnings.*
