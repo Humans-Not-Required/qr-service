@@ -106,8 +106,9 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 5. ~~**Auth refactor phase 2**~~ ✅ Done (2026-02-08 13:10 UTC) — Per-resource manage_token for tracked QR. Removed global API keys, admin system, list_tracked_qr. ManageToken guard (Bearer/X-API-Key/?key=). Fresh DB required.
 6. ~~**Frontend update**~~ ✅ Done (2026-02-08 13:40 UTC) — Removed API key settings, History tab. Updated to use image_base64/share_url. Added Tracked QR tab with manage_token support.
 7. ~~**Deploy to staging**~~ ✅ Done (2026-02-08 14:07 UTC) — Fresh DB (old volume removed), auth-refactored code live. Added .dockerignore (context 481MB → 439KB).
-8. **PDF output format** — mentioned in roadmap, not yet implemented
-9. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
+8. ~~**QR analytics dashboard**~~ ✅ Done (2026-02-09 13:09 UTC) — Tracked tab redesigned with Dashboard/Create/Import sub-views. Dashboard shows stat cards, bar chart rankings, expandable detail panel with recent scans. localStorage persistence for tracked QR codes + manage tokens. Import tab for adding existing tracked QRs.
+9. **PDF output format** — mentioned in roadmap, not yet implemented
+10. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
 
 **Consider deployable?** ✅ **YES — fully deployable.** Core API is feature-complete: generate, decode, batch, templates, styles, tracked QR/short URLs, rate limiting with headers, OpenAPI spec, Docker support, React frontend served from the backend. Single port, single binary. README has setup instructions. Tests pass. Remaining items (PDF, logo overlay) are enhancements.
 
@@ -135,4 +136,8 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ---
 
-*Last updated: 2026-02-08 11:45 UTC — Session: Auth refactor phase 1 — stateless QR generation, IP-based rate limiting, share URLs. 25 tests passing, zero clippy warnings.*
+### Completed (2026-02-09 Overnight — 13:09 UTC)
+
+- ~~**QR analytics dashboard**~~ ✅ — Tracked tab redesigned with 3 sub-views: Dashboard (stat cards for total QR codes/scans/avg, all tracked QR codes with horizontal bar chart showing relative scan volume, expandable detail panel with recent scans/target/expiry), Create (tracked QR creation with manage token display), Import (add existing tracked QR by ID + manage token). localStorage persistence for tracked QR codes and manage tokens across sessions. Auto-loads stats on mount. Per-item refresh. Commit: cc2a4ec
+
+*Last updated: 2026-02-09 13:09 UTC — QR analytics dashboard. 23 tests passing, zero clippy warnings.*
