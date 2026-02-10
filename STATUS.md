@@ -110,7 +110,13 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 **Consider deployable?** ✅ **YES — fully deployable.** Core API is feature-complete: generate, decode, batch, templates, styles, tracked QR/short URLs, rate limiting with headers, OpenAPI spec, Docker support, React frontend served from the backend. Single port, single binary. README has setup instructions. Tests pass. Remaining items (PDF, logo overlay) are enhancements.
 
-**⚡ Auth refactor complete. Frontend update + deploy remaining.**
+**⚡ Auth refactor complete. All features deployed.**
+
+### Completed (2026-02-10 Daytime — 02:45 UTC)
+
+- **Health endpoint uptime fix** ✅ — uptime_seconds was hardcoded to 0. Now uses `LazyLock<Instant>` for real elapsed time tracking.
+- **CI pipeline fix** ✅ — Added `--test-threads=1` to cargo test (SQLite locking) + clippy check. Previous runs were intermittently failing.
+- **STATUS.md cleanup** ✅ — Updated CI section (was incorrectly marked as blocked).
 
 ### ⚠️ Gotchas
 
