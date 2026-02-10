@@ -69,12 +69,10 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 - **Code Quality:** Zero clippy warnings, cargo fmt clean
 - **Deployment:** Single-port unified serving (API + frontend on same origin)
 
-### GitHub Actions CI (Ready but Blocked)
+### GitHub Actions CI ✅
 
-- `.github/workflows/ci.yml` exists locally but can't be pushed — OAuth token lacks `workflow` scope
-- Workflow includes: fmt check, clippy with -D warnings, test suite, release build, Docker build
-- **Action needed:** Either add `workflow` scope to token or push the file manually via GitHub web UI
-- File location: `.github/workflows/ci.yml`
+- CI/CD pipeline active: fmt check, clippy, test suite, Docker build + push to ghcr.io
+- All recent runs passing (verified 2026-02-10)
 
 ### Tech Stack
 
@@ -99,7 +97,7 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 ### What's Next (Priority Order)
 
-1. ~~**Push CI workflow**~~ — BLOCKED (attempts: 3). Token lacks `workflow` scope. File exists locally at `.github/workflows/ci.yml`. Needs manual push via GitHub web UI or token scope update by Jordan.
+1. ~~**Push CI workflow**~~ ✅ Done — CI/CD pipeline active and passing.
 2. ~~**Frontend**~~ ✅ Done — React dashboard with generate/decode/templates/history tabs
 3. ~~**Serve frontend from Rocket**~~ ✅ Done — FileServer + SPA fallback, single-port deployment
 4. ~~**Auth refactor phase 1**~~ ✅ Done (2026-02-08 11:45 UTC) — basic QR routes (generate/decode/batch/template) now stateless, no auth required. IP-based rate limiting. Stateless share URLs via `/qr/view?data=...`. Removed history/get/delete for basic QR. Response shape changed (share_url replaces id/created_at).
@@ -117,7 +115,7 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 ### ⚠️ Gotchas
 
 - `cargo` not on PATH by default — use `export PATH="$HOME/.cargo/bin:$PATH"` before building
-- CI workflow push blocked — GitHub token lacks `workflow` scope
+- ~~CI workflow push blocked~~ — Resolved, CI active
 - Styles accepted but style column in DB is informational only (not used for re-rendering)
 - CORS wide open (all origins) — tighten for production
 - OpenAPI spec is at v0.4.0 — 14 paths, 18 schemas + 3 headers, rate limit fully documented

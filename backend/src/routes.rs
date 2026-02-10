@@ -5,12 +5,16 @@ use rocket::response::Redirect;
 use rocket::serde::json::Json;
 use rocket::State;
 use std::path::PathBuf;
+use std::sync::LazyLock;
+use std::time::Instant;
 
 use crate::auth::{ClientIp, ManageToken};
 use crate::db::{hash_token, DbPool};
 use crate::models::*;
 use crate::qr;
 use crate::rate_limit::RateLimiter;
+
+static START_TIME: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 // Default IP rate limit: 100 requests per window
 const IP_RATE_LIMIT: u64 = 100;
@@ -56,7 +60,7 @@ pub fn health() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        uptime_seconds: 0,
+        uptime_seconds: START_TIME.elapsed().as_secs(),
     })
 }
 
