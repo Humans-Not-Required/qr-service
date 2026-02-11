@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- QR code style icon -->
+  <rect x="4" y="4" width="20" height="20" rx="2" stroke="#6366f1" stroke-width="3" fill="none"/>
+  <rect x="9" y="9" width="10" height="10" rx="1" fill="#6366f1"/>
+  <rect x="40" y="4" width="20" height="20" rx="2" stroke="#6366f1" stroke-width="3" fill="none"/>
+  <rect x="45" y="9" width="10" height="10" rx="1" fill="#6366f1"/>
+  <rect x="4" y="40" width="20" height="20" rx="2" stroke="#6366f1" stroke-width="3" fill="none"/>
+  <rect x="9" y="45" width="10" height="10" rx="1" fill="#6366f1"/>
+  <rect x="28" y="4" width="8" height="8" fill="#818cf8"/>
+  <rect x="28" y="16" width="8" height="8" fill="#818cf8"/>
+  <rect x="28" y="28" width="8" height="8" fill="#6366f1"/>
+  <rect x="40" y="28" width="8" height="8" fill="#818cf8"/>
+  <rect x="52" y="28" width="8" height="8" fill="#818cf8"/>
+  <rect x="28" y="40" width="8" height="8" fill="#818cf8"/>
+  <rect x="40" y="40" width="8" height="8" fill="#6366f1"/>
+  <rect x="52" y="40" width="8" height="8" fill="#818cf8"/>
+  <rect x="40" y="52" width="8" height="8" fill="#818cf8"/>
+  <rect x="52" y="52" width="8" height="8" fill="#6366f1"/>
+</svg>
