@@ -505,7 +505,7 @@ body {
 /* ===== Dashboard Stat Cards ===== */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.75rem;
   margin-bottom: 1.25rem;
 }
@@ -750,6 +750,165 @@ body {
   font-size: 0.8rem;
 }
 
+/* ===== Dashboard Toolbar ===== */
+.dash-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+/* ===== Stat Card Variants ===== */
+.stat-card__value--sm {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+/* ===== QR Row Last Scan ===== */
+.qr-row__last-scan {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
+/* ===== Analytics Sections ===== */
+.analytics-section {
+  margin-top: 0.75rem;
+}
+
+.analytics-section .label {
+  margin-bottom: 0.5rem;
+  display: block;
+}
+
+/* ===== Device Breakdown ===== */
+.device-breakdown {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.device-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.4rem 0.65rem;
+  font-size: 0.8rem;
+}
+
+.device-chip__icon {
+  font-size: 0.9rem;
+}
+
+.device-chip__label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.device-chip__count {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.device-chip__pct {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+/* ===== Timeline Chart ===== */
+.timeline-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 100px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.5rem 1.5rem;
+  overflow-x: auto;
+}
+
+.timeline-bar-wrap {
+  flex: 1;
+  min-width: 28px;
+  max-width: 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+  position: relative;
+}
+
+.timeline-bar {
+  width: 100%;
+  background: linear-gradient(180deg, var(--accent), #a78bfa);
+  border-radius: 3px 3px 0 0;
+  min-height: 4px;
+  position: relative;
+  transition: height 300ms ease;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.timeline-bar__count {
+  font-size: 0.6rem;
+  color: #fff;
+  font-weight: 600;
+  padding-top: 2px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.timeline-bar__label {
+  position: absolute;
+  bottom: -18px;
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ===== Detail Info Grid ===== */
+.detail-info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+/* ===== Scan Row Enhanced ===== */
+.scan-row__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.scan-row__time {
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.scan-row__device {
+  font-size: 0.75rem;
+}
+
+.scan-row__ua {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-row__referrer {
+  color: var(--accent);
+  font-size: 0.75rem;
+}
+
 /* ===== Animations ===== */
 @keyframes fadeSlideIn {
   from { opacity: 0; transform: translateY(6px); }
@@ -820,7 +979,7 @@ body {
   }
 
   .stat-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .qr-row {
@@ -842,6 +1001,10 @@ body {
 
 @media (min-width: 641px) and (max-width: 768px) {
   .stat-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .timeline-chart {
+    height: 80px;
   }
 }

@@ -7,6 +7,49 @@ const FORMATS = ['png', 'svg'];
 const EC_LEVELS = ['L', 'M', 'Q', 'H'];
 const TEMPLATES = ['wifi', 'vcard', 'url'];
 
+// ========== Helpers ==========
+
+function relativeTime(dateStr) {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffSec = Math.floor((now - then) / 1000);
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d ago`;
+  return new Date(dateStr).toLocaleDateString();
+}
+
+function parseDeviceType(ua) {
+  if (!ua) return 'unknown';
+  const lower = ua.toLowerCase();
+  if (/bot|crawl|spider|slurp|feed|scrape/.test(lower)) return 'bot';
+  if (/mobile|android|iphone|ipad|ipod|webos|opera mini|opera mobi/.test(lower)) return 'mobile';
+  return 'desktop';
+}
+
+function groupScansByDay(scans) {
+  if (!scans || scans.length === 0) return [];
+  const buckets = {};
+  scans.forEach(s => {
+    const day = new Date(s.scanned_at).toISOString().slice(0, 10);
+    buckets[day] = (buckets[day] || 0) + 1;
+  });
+  return Object.entries(buckets)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, count]) => ({ day, count }));
+}
+
+function deviceBreakdown(scans) {
+  if (!scans || scans.length === 0) return {};
+  const counts = { desktop: 0, mobile: 0, bot: 0, unknown: 0 };
+  scans.forEach(s => { counts[parseDeviceType(s.user_agent)]++; });
+  return counts;
+}
+
 // ========== Toast Hook ==========
 
 function useToast(duration = 2000) {
@@ -651,11 +694,36 @@ function TrackedTab({ showToast }) {
     }
   };
 
+  const refreshAll = async () => {
+    setDashLoading(true);
+    const results = await Promise.all(
+      tracked.map(async (item) => {
+        try {
+          const { data: res } = await getTrackedStats(item.id, item.manage_token);
+          return [item.id, res];
+        } catch {
+          return [item.id, { error: true, scan_count: item._lastScanCount || 0 }];
+        }
+      })
+    );
+    const map = {};
+    results.forEach(([id, data]) => { map[id] = data; });
+    setStatsMap(map);
+    setDashLoading(false);
+    showToast('All stats refreshed');
+  };
+
   const totalScans = Object.values(statsMap).reduce((sum, s) => sum + (s.scan_count || 0), 0);
   const topPerformers = [...tracked]
-    .map(t => ({ ...t, scans: statsMap[t.id]?.scan_count || 0 }))
+    .map(t => ({ ...t, scans: statsMap[t.id]?.scan_count || 0, lastScan: statsMap[t.id]?.recent_scans?.[0]?.scanned_at }))
     .sort((a, b) => b.scans - a.scans);
   const maxScans = topPerformers.length > 0 ? Math.max(topPerformers[0].scans, 1) : 1;
+
+  // Find most recent scan across all tracked QR codes
+  const lastActivity = topPerformers.reduce((latest, t) => {
+    if (t.lastScan && (!latest || new Date(t.lastScan) > new Date(latest))) return t.lastScan;
+    return latest;
+  }, null);
 
   const selectedStats = selectedId ? statsMap[selectedId] : null;
   const selectedItem = selectedId ? tracked.find(t => t.id === selectedId) : null;
@@ -765,7 +833,19 @@ function TrackedTab({ showToast }) {
               <div className="stat-card__value">{tracked.length > 0 ? (totalScans / tracked.length).toFixed(1) : '0'}</div>
               <div className="stat-card__label">Avg Scans / QR</div>
             </div>
+            <div className="stat-card">
+              <div className="stat-card__value stat-card__value--sm">{lastActivity ? relativeTime(lastActivity) : '—'}</div>
+              <div className="stat-card__label">Last Activity</div>
+            </div>
           </div>
+
+          {tracked.length > 0 && (
+            <div className="dash-toolbar">
+              <button onClick={refreshAll} disabled={dashLoading} className="btn btn--secondary btn--sm">
+                {dashLoading ? '⟳ Refreshing…' : '🔄 Refresh All'}
+              </button>
+            </div>
+          )}
 
           {dashLoading && <p className="hint">Loading stats…</p>}
 
@@ -799,6 +879,9 @@ function TrackedTab({ showToast }) {
                         {item.scans} {item.scans === 1 ? 'scan' : 'scans'}
                       </span>
                     </div>
+                    {item.lastScan && (
+                      <span className="qr-row__last-scan">Last: {relativeTime(item.lastScan)}</span>
+                    )}
                   </div>
                   <div className="qr-row__actions">
                     <button
@@ -819,17 +902,21 @@ function TrackedTab({ showToast }) {
                 <div className="detail-panel">
                   <div className="card">
                     <div className="detail-header">
-                      <h3>📈 {selectedItem.short_code || selectedId.slice(0, 8)} — Details</h3>
+                      <h3>📈 {selectedItem.short_code || selectedId.slice(0, 8)} — Analytics</h3>
                       <button onClick={() => setSelectedId(null)} className="btn btn--ghost btn--sm">✕</button>
                     </div>
-                    <div>
+                    <div className="detail-info-grid">
                       <p className="detail-row">
                         <strong>Target:</strong>{' '}
                         <a href={selectedStats.target_url} target="_blank" rel="noopener" className="link">{selectedStats.target_url}</a>
                       </p>
                       <p className="detail-row"><strong>Total Scans:</strong> {selectedStats.scan_count}</p>
-                      {selectedStats.short_code && (
-                        <p className="detail-row"><strong>Short Code:</strong> <code className="code">{selectedStats.short_code}</code></p>
+                      {selectedItem.short_url && (
+                        <p className="detail-row">
+                          <strong>Short URL:</strong>{' '}
+                          <code className="code">{selectedItem.short_url}</code>
+                          <button onClick={(e) => { e.stopPropagation(); copy(selectedItem.short_url, 'Short URL copied'); }} className="btn btn--ghost btn--sm">📋</button>
+                        </p>
                       )}
                       {selectedStats.expires_at && (
                         <p className="detail-row"><strong>Expires:</strong> {new Date(selectedStats.expires_at).toLocaleString()}</p>
@@ -839,17 +926,88 @@ function TrackedTab({ showToast }) {
                       )}
                     </div>
 
+                    {/* Scan Timeline */}
+                    {selectedStats.recent_scans?.length > 0 && (() => {
+                      const daily = groupScansByDay(selectedStats.recent_scans);
+                      const maxDay = Math.max(...daily.map(d => d.count), 1);
+                      const devices = deviceBreakdown(selectedStats.recent_scans);
+                      const totalDevice = Object.values(devices).reduce((a, b) => a + b, 0);
+                      return (
+                        <>
+                          {/* Device Breakdown */}
+                          <div className="analytics-section">
+                            <h4 className="label">Device Breakdown</h4>
+                            <div className="device-breakdown">
+                              {devices.desktop > 0 && (
+                                <div className="device-chip">
+                                  <span className="device-chip__icon">🖥️</span>
+                                  <span className="device-chip__label">Desktop</span>
+                                  <span className="device-chip__count">{devices.desktop}</span>
+                                  <span className="device-chip__pct">{Math.round(devices.desktop / totalDevice * 100)}%</span>
+                                </div>
+                              )}
+                              {devices.mobile > 0 && (
+                                <div className="device-chip">
+                                  <span className="device-chip__icon">📱</span>
+                                  <span className="device-chip__label">Mobile</span>
+                                  <span className="device-chip__count">{devices.mobile}</span>
+                                  <span className="device-chip__pct">{Math.round(devices.mobile / totalDevice * 100)}%</span>
+                                </div>
+                              )}
+                              {devices.bot > 0 && (
+                                <div className="device-chip">
+                                  <span className="device-chip__icon">🤖</span>
+                                  <span className="device-chip__label">Bot</span>
+                                  <span className="device-chip__count">{devices.bot}</span>
+                                  <span className="device-chip__pct">{Math.round(devices.bot / totalDevice * 100)}%</span>
+                                </div>
+                              )}
+                              {devices.unknown > 0 && (
+                                <div className="device-chip">
+                                  <span className="device-chip__icon">❓</span>
+                                  <span className="device-chip__label">Unknown</span>
+                                  <span className="device-chip__count">{devices.unknown}</span>
+                                  <span className="device-chip__pct">{Math.round(devices.unknown / totalDevice * 100)}%</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Timeline Chart */}
+                          {daily.length > 1 && (
+                            <div className="analytics-section">
+                              <h4 className="label">Scans by Day</h4>
+                              <div className="timeline-chart">
+                                {daily.map(({ day, count }) => (
+                                  <div key={day} className="timeline-bar-wrap" title={`${day}: ${count} scan${count !== 1 ? 's' : ''}`}>
+                                    <div className="timeline-bar" style={{ height: `${(count / maxDay) * 100}%` }}>
+                                      <span className="timeline-bar__count">{count}</span>
+                                    </div>
+                                    <span className="timeline-bar__label">{day.slice(5)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+
+                    {/* Recent Scans */}
                     {selectedStats.recent_scans?.length > 0 ? (
-                      <div>
-                        <h4 className="label" style={{ marginTop: '0.5rem', marginBottom: '0.4rem' }}>Recent Scans</h4>
+                      <div className="analytics-section">
+                        <h4 className="label">Recent Scans</h4>
                         <div className="scans-list">
                           {selectedStats.recent_scans.map((s, i) => (
                             <div key={i} className="scan-row">
-                              <span style={{ color: 'var(--text-primary)', fontSize: '0.8rem' }}>{new Date(s.scanned_at).toLocaleString()}</span>
-                              <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              <div className="scan-row__top">
+                                <span className="scan-row__time">{relativeTime(s.scanned_at)}</span>
+                                <span className="scan-row__device">{parseDeviceType(s.user_agent) === 'mobile' ? '📱' : parseDeviceType(s.user_agent) === 'bot' ? '🤖' : '🖥️'}</span>
+                              </div>
+                              <span className="scan-row__ua">
                                 {s.user_agent?.slice(0, 60) || 'Unknown agent'}
                               </span>
-                              {s.referrer && <span style={{ color: 'var(--accent)', fontSize: '0.75rem' }}>via {s.referrer}</span>}
+                              {s.referrer && <span className="scan-row__referrer">via {s.referrer}</span>}
                             </div>
                           ))}
                         </div>
