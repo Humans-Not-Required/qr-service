@@ -1,5 +1,4 @@
 // Unit tests for QR service core functionality
-use std::env;
 
 #[test]
 fn test_health_endpoint() {
@@ -288,8 +287,7 @@ fn test_style_from_str() {
 /// Helper: create a test DB with new schema (no api_keys), return pool
 fn setup_test_db() -> qr_service::db::DbPool {
     let db_path = format!("/tmp/qr_test_{}.db", uuid::Uuid::new_v4());
-    env::set_var("DATABASE_PATH", &db_path);
-    qr_service::db::init_db().expect("Failed to init test DB")
+    qr_service::db::init_db_with_path(&db_path).expect("Failed to init test DB")
 }
 
 #[test]

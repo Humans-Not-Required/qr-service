@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -- --test-threads=1
+      - run: cargo test
         working-directory: backend/
       - run: cargo clippy -- -D warnings
         working-directory: backend/

@@ -12,10 +12,9 @@ use std::time::Duration;
 /// Build a Rocket test client with a fresh database.
 fn test_client() -> Client {
     let db_path = format!("/tmp/qr_http_test_{}.db", uuid::Uuid::new_v4());
-    std::env::set_var("DATABASE_PATH", &db_path);
     std::env::set_var("BASE_URL", "http://localhost:8000");
 
-    let db = qr_service::db::init_db().expect("DB should initialize");
+    let db = qr_service::db::init_db_with_path(&db_path).expect("DB should initialize");
     let limiter = qr_service::rate_limit::RateLimiter::new(Duration::from_secs(3600));
 
     let rocket = rocket::build()
