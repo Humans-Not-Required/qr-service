@@ -152,4 +152,35 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 
 - **33 HTTP integration tests** ✅ — Full Rocket test client coverage: health/openapi/llms.txt, stateless QR generation (PNG/SVG/colors/styles), input validation (empty data, invalid size/format), decode roundtrip, batch + template endpoints (wifi/vcard/url), stateless share URL view, tracked QR lifecycle (create/stats/delete), per-resource token auth guards (valid/wrong/missing), short URL redirect, rate limiting. Also fixed stale `api_keys` comment in rate_limit.rs. Commit: 10111ef
 
-*Last updated: 2026-02-09 22:15 UTC — 33 HTTP tests added. 59 tests total (3 unit + 33 HTTP + 23 integration), zero clippy warnings.*
+### Completed (2026-02-11 Daytime — 23:12 UTC)
+
+- **Full UI reevaluation** ✅ — Comprehensive frontend overhaul:
+  - Extracted all inline styles to `App.css` with CSS custom properties (`--bg-primary`, `--accent`, etc.) for easy theming
+  - Fixed `useState` misuse for health check → proper `useEffect`
+  - Added responsive design with mobile breakpoints (640px, 768px) — form rows stack, stats cards reflow, QR results center
+  - Added toast notification system (`useToast` hook) for copy/action feedback
+  - Collapsible "Advanced Options" in Generate tab — cleaner default UX, options revealed on demand
+  - Custom QR-pattern SVG logo replacing "⬛" emoji in header
+  - Proper hover states, focus rings (`:focus` with `box-shadow`), and CSS transitions
+  - Gradient accent bars in tracked QR dashboard
+  - Smooth `fadeSlideIn` animations for results and `toastIn` for notifications
+  - Cleaner footer with `llms.txt` link added
+  - Removed 500+ lines of inline style objects — all CSS now in dedicated file
+  - Better empty states, section titles, and visual hierarchy
+  - No backend changes. All 59 tests pass. Commit: 6068061
+
+*Last updated: 2026-02-13 22:10 UTC — Analytics dashboard enhancements. 59 tests total (3 unit + 33 HTTP + 23 integration), zero clippy warnings.*
+
+### Completed (2026-02-13 Daytime — 22:10 UTC)
+
+- **Analytics dashboard enhancements** ✅ — Scan timeline bar chart (scans by day), device breakdown chips (desktop/mobile/bot with percentages), relative time formatting, 4th stat card "Last Activity", "Refresh All" button, per-QR last-scan indicator, copy short URL in detail panel. No backend changes. Commit: ef0f3f3
+- **Note:** Pre-existing test failure in `test_http_batch_generate` — not introduced by this change, needs separate investigation.
+
+## Incoming Directions (Work Queue)
+
+<!-- WORK_QUEUE_DIRECTIONS_START -->
+- [ ] QR app full ui reevaluation — Do a full reevaluation of the qr service ui (Jordan; 2026-02-13 07:52:02; task_id: 1de0175c-0904-473e-a717-4b68bc077daa)
+<!-- WORK_QUEUE_DIRECTIONS_END -->
+
+## Incoming directions (2026-02-13T17:49:01Z)
+- Jordan requested verification/closure: llms.txt endpoints for QR Service + Agent Docs (task 37f70e42).
