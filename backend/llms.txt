@@ -1,45 +1,146 @@
 # QR Service API
 > Generate, decode, and track QR codes. Agent-first with zero signup.
+> Supports PNG, SVG, and PDF output. Logo overlay, batch generation, Wi-Fi/vCard templates, and tracked short URLs with scan analytics.
 
 ## Base URL
 /api/v1
 
 ## Quick Start
 1. Generate QR: POST /api/v1/qr/generate {"content": "https://example.com"}
+   - Returns base64-encoded QR image + share URL
 2. Decode QR: POST /api/v1/qr/decode (multipart, file=image)
-3. Tracked QR: POST /api/v1/qr/tracked {"target_url": "...", "name": "..."}
+3. Tracked QR: POST /api/v1/qr/tracked {"target_url": "..."}
    - Returns manage_token + short URL with scan analytics
+
+## Auth
+- Stateless endpoints (generate, decode, batch, template, view): no auth required
+- Tracked QR write operations: require manage_token via Bearer header, X-API-Key header, or ?key= query param
+- No user accounts. Tracked QR codes are the only resource. Tokens are per-QR.
+
+## Rate Limits
+- All endpoints: rate limited per IP
 
 ## Endpoints
 
-### Stateless QR (no auth)
-- POST /qr/generate — generate QR code (PNG/SVG/PDF, styles: square/rounded/dots)
-  - format: "png" (default), "svg", or "pdf" (vector PDF, ideal for print)
-  - Optional: logo (base64/data URI, max 512KB) + logo_size (5-40%, default 20%)
-  - Logo overlay auto-upgrades error correction to H for max redundancy
-- POST /qr/decode — decode QR from image
-- POST /qr/batch — batch generate (up to 50)
-- POST /qr/template/{type} — generate from template (wifi/vcard/url)
+### POST /qr/generate — Generate QR Code
+Create a single QR code image. Returns base64-encoded data URI.
 
-### Tracked QR (auth required)
-- POST /qr/tracked — create tracked QR with short URL (returns manage_token)
-- GET /qr/tracked/{id}/stats — scan analytics
-- DELETE /qr/tracked/{id} — delete tracked QR
+Request body:
+  data (required): string — content to encode
+  format: "png" (default), "svg", or "pdf"
+  size: 64-4096 (default 256) — image dimensions in pixels
+  fg_color: hex color string (default "#000000") — foreground/module color
+  bg_color: hex color string (default "#FFFFFF") — background color
+  error_correction: "L", "M" (default), "Q", or "H"
+  style: "square" (default), "rounded", or "dots" — module shape
+  logo: base64 string or data URI (optional) — logo image to overlay at center (max 512KB)
+  logo_size: 5-40 (default 20) — logo size as percentage of QR dimensions
 
-### Short URLs
-- GET /r/{code} — redirect (records scan event)
+Response: {"image_base64": "data:image/png;base64,...", "share_url": "...", "format": "png", "size": 256, "data": "..."}
 
-### Utility
-- GET /health — health check
-- GET /openapi.json — OpenAPI 3.0 spec
-- GET /qr/view?data=... — stateless QR image viewer
+Notes:
+- When logo is provided, error correction is automatically upgraded to H for maximum redundancy
+- PDF output produces vector PDF (ideal for print, no rasterization)
+- SVG output includes inline logo overlay when logo is provided
 
-## Auth
-Tracked QR: Bearer token or X-API-Key header (manage_token from create)
-Stateless QR: no auth required
+### POST /qr/decode — Decode QR from Image
+Upload an image to extract the encoded content.
 
-## OpenAPI
-Full spec: GET /api/v1/openapi.json
+Request: multipart/form-data with file field containing the image
+Response: {"content": "decoded text", "format": "QR_CODE"}
+Error: 422 if no QR code found in image
+
+### POST /qr/batch — Batch Generate
+Generate up to 50 QR codes in one request.
+
+Request body: {"items": [<GenerateRequest>, ...]}
+Each item follows the same schema as POST /qr/generate.
+Response: {"results": [<QrResponse>, ...], "count": N}
+Error: 400 if more than 50 items
+
+### POST /qr/template/{type} — Template Generation
+Generate QR codes from structured templates.
+
+Template types:
+- wifi: {"ssid": "MyNetwork", "password": "secret", "encryption": "WPA"}
+  Generates WIFI:T:WPA;S:MyNetwork;P:secret;; format
+- vcard: {"first_name": "...", "last_name": "...", "phone": "...", "email": "...", "org": "...", "title": "...", "url": "..."}
+  Generates vCard 3.0 format
+- url: {"url": "https://example.com"}
+  Convenience wrapper for URL QR codes
+
+All template requests accept the same optional styling params as /qr/generate (format, size, fg_color, bg_color, style, error_correction).
+
+### GET /qr/view — Stateless QR Viewer
+Render a QR code directly as an image (no JSON wrapper).
+
+Query params:
+  data (required): content to encode
+  size: image size (default 256)
+  fg: foreground hex color
+  bg: background hex color
+  format: "png" (default) or "svg"
+  style: "square", "rounded", or "dots"
+
+Returns: image/png or image/svg+xml directly (not base64-wrapped)
+Useful for embedding: <img src="/api/v1/qr/view?data=hello&size=128">
+
+### POST /qr/tracked — Create Tracked QR Code
+Create a QR code with a short URL that records scan events.
+
+Request body:
+  target_url (required): destination URL
+  short_code: custom short code (auto-generated if omitted)
+  expires_at: ISO-8601 expiry timestamp (optional)
+  Plus all styling params from /qr/generate (format, size, fg_color, bg_color, style, error_correction)
+
+Response:
+  id: tracked QR UUID
+  qr_id: underlying QR code UUID
+  short_code: the generated/custom short code
+  short_url: full short URL (e.g., http://host/r/abc123)
+  target_url: destination
+  manage_token: auth token for stats/delete (shown once — save it!)
+  manage_url: URL with embedded manage token
+  scan_count: 0 (initially)
+  expires_at: expiry timestamp or null
+  created_at: ISO-8601
+  qr: embedded QR response (image_base64, share_url, etc.)
+
+### GET /qr/tracked/{id}/stats — Scan Analytics
+Get scan statistics for a tracked QR code.
+
+Auth: manage_token required
+Response:
+  id, short_code, target_url, scan_count, expires_at, created_at
+  recent_scans: [{id, scanned_at, user_agent, referrer}, ...]
+
+### DELETE /qr/tracked/{id} — Delete Tracked QR
+Remove a tracked QR code and all scan data.
+
+Auth: manage_token required
+Response: 204 No Content
+
+### GET /r/{code} — Short URL Redirect
+Redirects to the tracked QR's target URL. Records a scan event with user agent and referrer.
+Returns 404 if code not found or expired.
+
+### GET /health — Health Check
+Response: {"status": "ok", "version": "0.1.0"}
+
+### GET /openapi.json — OpenAPI 3.0 Specification
+Full machine-readable API spec.
+
+### GET /llms.txt — This Document
+AI-readable API summary.
+
+## Error Responses
+All errors return JSON:
+{"error": "description", "code": "ERROR_CODE", "status": 400}
+
+Error codes: EMPTY_DATA, INVALID_SIZE, INVALID_FORMAT, INVALID_FG_COLOR, INVALID_BG_COLOR,
+INVALID_LOGO, LOGO_TOO_LARGE, INVALID_LOGO_SIZE, GENERATION_FAILED, LOGO_OVERLAY_FAILED,
+BATCH_TOO_LARGE, INVALID_TEMPLATE, RATE_LIMITED, NOT_FOUND, UNAUTHORIZED, DECODE_FAILED
 
 ## Source
 https://github.com/Humans-Not-Required/qr-service
