@@ -106,7 +106,7 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 7. ~~**Deploy to staging**~~ ✅ Done (2026-02-08 14:07 UTC) — Fresh DB (old volume removed), auth-refactored code live. Added .dockerignore (context 481MB → 439KB).
 8. ~~**QR analytics dashboard**~~ ✅ Done (2026-02-09 13:09 UTC) — Tracked tab redesigned with Dashboard/Create/Import sub-views. Dashboard shows stat cards, bar chart rankings, expandable detail panel with recent scans. localStorage persistence for tracked QR codes + manage tokens. Import tab for adding existing tracked QRs.
 9. **PDF output format** — mentioned in roadmap, not yet implemented
-10. **Logo/image overlay** — embed a small logo in the center of QR codes (requires high EC)
+10. ~~**Logo/image overlay**~~ ✅ Done (2026-02-16 01:15 UTC) — Optional `logo` field (base64/data URI, max 512KB) + `logo_size` (5-40%, default 20%). Auto-upgrades EC to H. PNG alpha-blended overlay with white rounded-rect background. SVG embedded `<image>` element. Roundtrip scannable verified. 16 new tests (78 total). Commit: 33280e5.
 
 **Consider deployable?** ✅ **YES — fully deployable.** Core API is feature-complete: generate, decode, batch, templates, styles, tracked QR/short URLs, rate limiting with headers, OpenAPI spec, Docker support, React frontend served from the backend. Single port, single binary. README has setup instructions. Tests pass. Remaining items (PDF, logo overlay) are enhancements.
 
