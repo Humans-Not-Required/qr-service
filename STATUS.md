@@ -105,10 +105,10 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
 6. ~~**Frontend update**~~ ✅ Done (2026-02-08 13:40 UTC) — Removed API key settings, History tab. Updated to use image_base64/share_url. Added Tracked QR tab with manage_token support.
 7. ~~**Deploy to staging**~~ ✅ Done (2026-02-08 14:07 UTC) — Fresh DB (old volume removed), auth-refactored code live. Added .dockerignore (context 481MB → 439KB).
 8. ~~**QR analytics dashboard**~~ ✅ Done (2026-02-09 13:09 UTC) — Tracked tab redesigned with Dashboard/Create/Import sub-views. Dashboard shows stat cards, bar chart rankings, expandable detail panel with recent scans. localStorage persistence for tracked QR codes + manage tokens. Import tab for adding existing tracked QRs.
-9. **PDF output format** — mentioned in roadmap, not yet implemented
+9. ~~**PDF output format**~~ ✅ Done (2026-02-16 01:20 UTC) — Vector PDF output via `printpdf`. All 3 styles (square/rounded/dots) rendered as PDF paths/shapes. Custom colors supported. Available in generate, batch, template, view, and tracked endpoints. 7 new tests (85 total). Commit: c6c867b.
 10. ~~**Logo/image overlay**~~ ✅ Done (2026-02-16 01:15 UTC) — Optional `logo` field (base64/data URI, max 512KB) + `logo_size` (5-40%, default 20%). Auto-upgrades EC to H. PNG alpha-blended overlay with white rounded-rect background. SVG embedded `<image>` element. Roundtrip scannable verified. 16 new tests (78 total). Commit: 33280e5.
 
-**Consider deployable?** ✅ **YES — fully deployable.** Core API is feature-complete: generate, decode, batch, templates, styles, tracked QR/short URLs, rate limiting with headers, OpenAPI spec, Docker support, React frontend served from the backend. Single port, single binary. README has setup instructions. Tests pass. Remaining items (PDF, logo overlay) are enhancements.
+**Consider deployable?** ✅ **YES — fully deployable.** Core API is feature-complete: generate (PNG/SVG/PDF), decode, batch, templates, styles, logo overlay, tracked QR/short URLs, rate limiting with headers, OpenAPI spec, Docker support, React frontend served from the backend. Single port, single binary. README has setup instructions. All 85 tests pass.
 
 **⚡ Auth refactor complete. All features deployed.**
 
@@ -169,7 +169,7 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
   - Better empty states, section titles, and visual hierarchy
   - No backend changes. All 59 tests pass. Commit: 6068061
 
-*Last updated: 2026-02-14 00:02 UTC — Fixed test flakiness (parallel SQLite init race). 59 tests total (3 unit + 33 HTTP + 23 integration), zero clippy warnings.*
+*Last updated: 2026-02-16 01:20 UTC — PDF output format added. 85 tests total (3 unit + 51 HTTP + 28 integration + 3 lib), zero clippy warnings.*
 
 ### Completed (2026-02-13 Daytime — 22:10 UTC)
 
