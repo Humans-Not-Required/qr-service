@@ -537,6 +537,249 @@ fn test_http_short_url_not_found() {
     assert_eq!(response.status(), Status::NotFound);
 }
 
+// ============ Logo Overlay ============
+
+/// Generate a tiny 4x4 red PNG for testing logo overlay.
+fn test_logo_png() -> String {
+    use image::{ImageBuffer, Rgba};
+    let img = ImageBuffer::from_fn(4, 4, |_, _| Rgba([255u8, 0, 0, 255]));
+    let mut buf = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+    format!("data:image/png;base64,{}", B64.encode(buf.into_inner()))
+}
+
+#[test]
+fn test_logo_overlay_png() {
+    let client = test_client();
+    let logo = test_logo_png();
+    let body = serde_json::json!({
+        "data": "https://example.com",
+        "format": "png",
+        "size": 300,
+        "logo": logo
+    });
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let result: serde_json::Value = response.into_json().unwrap();
+    assert!(result["image_base64"].as_str().unwrap().starts_with("data:image/png;base64,"));
+    // Image should be larger than a non-logo QR due to higher EC level
+    assert!(result["image_base64"].as_str().unwrap().len() > 100);
+}
+
+#[test]
+fn test_logo_overlay_svg() {
+    let client = test_client();
+    let logo = test_logo_png();
+    let body = serde_json::json!({
+        "data": "https://example.com",
+        "format": "svg",
+        "size": 300,
+        "logo": logo
+    });
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let result: serde_json::Value = response.into_json().unwrap();
+    let svg_b64 = result["image_base64"].as_str().unwrap();
+    assert!(svg_b64.starts_with("data:image/svg+xml;base64,"));
+    // Decode and check SVG contains logo elements
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+    let svg_data = B64.decode(svg_b64.strip_prefix("data:image/svg+xml;base64,").unwrap()).unwrap();
+    let svg_str = String::from_utf8(svg_data).unwrap();
+    assert!(svg_str.contains("<image "), "SVG should contain embedded logo image");
+    assert!(svg_str.contains("data:image/png;base64,"), "SVG should contain logo data URI");
+}
+
+#[test]
+fn test_logo_overlay_custom_size() {
+    let client = test_client();
+    let logo = test_logo_png();
+    let body = serde_json::json!({
+        "data": "https://example.com",
+        "format": "png",
+        "size": 400,
+        "logo": logo,
+        "logo_size": 30
+    });
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let result: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(result["size"], 400);
+}
+
+#[test]
+fn test_logo_invalid_base64() {
+    let client = test_client();
+    let body = serde_json::json!({
+        "data": "https://example.com",
+        "logo": "not-valid-base64!!!"
+    });
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+    let result: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(result["code"], "INVALID_LOGO");
+}
+
+#[test]
+fn test_logo_invalid_image_data() {
+    let client = test_client();
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+    // Valid base64 but not a valid image
+    let bad_logo = B64.encode(b"this is not an image");
+    let body = serde_json::json!({
+        "data": "https://example.com",
+        "logo": bad_logo
+    });
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    // Should fail during overlay (logo decoding)
+    assert_eq!(response.status(), Status::InternalServerError);
+    let result: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(result["code"], "LOGO_OVERLAY_FAILED");
+}
+
+#[test]
+fn test_logo_size_too_small() {
+    let client = test_client();
+    let logo = test_logo_png();
+    let body = serde_json::json!({
+        "data": "https://example.com",
+        "logo": logo,
+        "logo_size": 2
+    });
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+    let result: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(result["code"], "INVALID_LOGO_SIZE");
+}
+
+#[test]
+fn test_logo_size_too_large() {
+    let client = test_client();
+    let logo = test_logo_png();
+    let body = serde_json::json!({
+        "data": "https://example.com",
+        "logo": logo,
+        "logo_size": 50
+    });
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+    let result: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(result["code"], "INVALID_LOGO_SIZE");
+}
+
+#[test]
+fn test_logo_with_data_uri_prefix() {
+    let client = test_client();
+    let logo = test_logo_png(); // Already has data:image/png;base64, prefix
+    let body = serde_json::json!({
+        "data": "https://example.com",
+        "logo": logo,
+        "format": "png"
+    });
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+}
+
+#[test]
+fn test_logo_raw_base64_without_prefix() {
+    let client = test_client();
+    // Create logo as raw base64 (no data URI prefix)
+    let img = image::ImageBuffer::from_fn(4, 4, |_, _| image::Rgba([0u8, 128, 255, 255]));
+    let mut buf = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+    let raw_b64 = B64.encode(buf.into_inner());
+
+    let body = serde_json::json!({
+        "data": "https://example.com",
+        "logo": raw_b64,
+        "format": "png"
+    });
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+}
+
+#[test]
+fn test_no_logo_still_works() {
+    // Ensure existing behavior is unchanged when no logo is provided
+    let client = test_client();
+    let body = serde_json::json!({
+        "data": "https://example.com",
+        "format": "png",
+        "size": 256
+    });
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let result: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(result["format"], "png");
+    assert_eq!(result["size"], 256);
+}
+
+#[test]
+fn test_logo_with_different_styles() {
+    let client = test_client();
+    let logo = test_logo_png();
+
+    for style in &["square", "rounded", "dots"] {
+        let body = serde_json::json!({
+            "data": "https://example.com",
+            "format": "png",
+            "style": style,
+            "logo": logo
+        });
+        let response = client
+            .post("/api/v1/qr/generate")
+            .header(ContentType::JSON)
+            .body(body.to_string())
+            .dispatch();
+        assert_eq!(response.status(), Status::Ok, "Logo overlay failed with style: {}", style);
+    }
+}
+
 // ============ Rate Limiting ============
 
 #[test]

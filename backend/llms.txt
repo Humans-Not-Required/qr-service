@@ -14,6 +14,8 @@
 
 ### Stateless QR (no auth)
 - POST /qr/generate — generate QR code (PNG/SVG, styles: square/rounded/dots)
+  - Optional: logo (base64/data URI, max 512KB) + logo_size (5-40%, default 20%)
+  - Logo overlay auto-upgrades error correction to H for max redundancy
 - POST /qr/decode — decode QR from image
 - POST /qr/batch — batch generate (up to 50)
 - POST /qr/template/{type} — generate from template (wifi/vcard/url)

@@ -3,6 +3,7 @@ use base64::Engine;
 use rocket::http::{ContentType, Status};
 use rocket::response::Redirect;
 use rocket::serde::json::Json;
+extern crate qrcode;
 use rocket::State;
 use std::path::PathBuf;
 use std::sync::LazyLock;
@@ -113,6 +114,39 @@ pub fn generate_qr(
         ));
     }
 
+    // Validate logo_size if provided
+    if req.logo_size < 5 || req.logo_size > 40 {
+        return Err((
+            Status::BadRequest,
+            Json(ApiError {
+                error: "logo_size must be between 5 and 40 (percentage)".to_string(),
+                code: "INVALID_LOGO_SIZE".to_string(),
+                status: 400,
+            }),
+        ));
+    }
+
+    // Decode logo if provided
+    let logo_data = match &req.logo {
+        Some(logo_str) => {
+            let data = qr::decode_logo_base64(logo_str).map_err(|e| {
+                (Status::BadRequest, Json(ApiError { error: e, code: "INVALID_LOGO".to_string(), status: 400 }))
+            })?;
+            if data.len() > 512 * 1024 {
+                return Err((
+                    Status::BadRequest,
+                    Json(ApiError {
+                        error: "Logo image must be under 512KB".to_string(),
+                        code: "LOGO_TOO_LARGE".to_string(),
+                        status: 400,
+                    }),
+                ));
+            }
+            Some(data)
+        }
+        None => None,
+    };
+
     let fg_color = qr::parse_hex_color(&req.fg_color).map_err(|e| {
         (Status::BadRequest, Json(ApiError { error: e, code: "INVALID_FG_COLOR".to_string(), status: 400 }))
     })?;
@@ -120,25 +154,48 @@ pub fn generate_qr(
         (Status::BadRequest, Json(ApiError { error: e, code: "INVALID_BG_COLOR".to_string(), status: 400 }))
     })?;
 
+    // Force EC level H when logo is present for maximum redundancy
+    let ec_level = if logo_data.is_some() {
+        qrcode::EcLevel::H
+    } else {
+        qr::parse_ec_level(&req.error_correction)
+    };
+
     let options = qr::QrOptions {
         size: req.size,
         fg_color,
         bg_color,
-        error_correction: qr::parse_ec_level(&req.error_correction),
+        error_correction: ec_level,
         style: qr::QrStyle::parse(&req.style),
     };
 
     let (image_data, content_type) = match req.format.as_str() {
         "png" => {
-            let data = qr::generate_png(&req.data, &options).map_err(|e| {
+            let mut data = qr::generate_png(&req.data, &options).map_err(|e| {
                 (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
             })?;
+            // Overlay logo if provided
+            if let Some(ref logo) = logo_data {
+                data = qr::overlay_logo_png(&data, logo, req.logo_size).map_err(|e| {
+                    (Status::InternalServerError, Json(ApiError { error: e, code: "LOGO_OVERLAY_FAILED".to_string(), status: 500 }))
+                })?;
+            }
             (data, "image/png")
         }
         "svg" => {
-            let svg = qr::generate_svg(&req.data, &options).map_err(|e| {
+            let mut svg = qr::generate_svg(&req.data, &options).map_err(|e| {
                 (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
             })?;
+            // Overlay logo if provided
+            if let Some(ref logo) = logo_data {
+                let overlay = qr::svg_logo_overlay(logo, req.size, req.logo_size).map_err(|e| {
+                    (Status::InternalServerError, Json(ApiError { error: e, code: "LOGO_OVERLAY_FAILED".to_string(), status: 500 }))
+                })?;
+                // Insert logo elements before closing </svg> tag
+                if let Some(pos) = svg.rfind("</svg>") {
+                    svg.insert_str(pos, &format!("{}\n", overlay));
+                }
+            }
             (svg.into_bytes(), "image/svg+xml")
         }
         _ => {

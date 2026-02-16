@@ -15,6 +15,15 @@ pub struct GenerateRequest {
     pub error_correction: String,
     #[serde(default = "default_style")]
     pub style: String,
+    /// Optional logo image as base64 data URI (e.g. "data:image/png;base64,...") or raw base64.
+    /// When provided, the logo is overlaid at the center of the QR code.
+    /// Error correction is automatically upgraded to H (highest) for maximum redundancy.
+    #[serde(default)]
+    pub logo: Option<String>,
+    /// Logo size as percentage of QR code dimensions (5-40, default 20).
+    /// The logo will occupy this percentage of the QR code's width and height.
+    #[serde(default = "default_logo_size")]
+    pub logo_size: u8,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -138,6 +147,9 @@ fn default_error_correction() -> String {
 }
 fn default_style() -> String {
     "square".to_string()
+}
+fn default_logo_size() -> u8 {
+    20
 }
 #[allow(dead_code)]
 fn default_wifi_encryption() -> String {

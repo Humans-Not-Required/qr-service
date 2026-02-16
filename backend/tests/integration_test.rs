@@ -468,3 +468,84 @@ fn test_manage_token_hash() {
     let h3 = qr_service::db::hash_token("qrt_different");
     assert_ne!(h1, h3);
 }
+
+// ============ Logo Overlay Unit Tests ============
+
+#[test]
+fn test_logo_overlay_roundtrip_scannable() {
+    // Generate a QR code with a logo overlay and verify it's still decodable
+    use qr_service::qr;
+
+    let options = qr::QrOptions {
+        size: 512,
+        fg_color: [0, 0, 0, 255],
+        bg_color: [255, 255, 255, 255],
+        error_correction: qrcode::EcLevel::H,
+        style: qr::QrStyle::Square,
+    };
+
+    let data = "https://example.com/logo-test";
+    let qr_png = qr::generate_png(data, &options).unwrap();
+
+    // Create a small 8x8 red logo
+    let logo_img = image::ImageBuffer::from_fn(8, 8, |_, _| image::Rgba([255u8, 0, 0, 255]));
+    let mut logo_buf = std::io::Cursor::new(Vec::new());
+    logo_img.write_to(&mut logo_buf, image::ImageFormat::Png).unwrap();
+
+    let result = qr::overlay_logo_png(&qr_png, &logo_buf.into_inner(), 20).unwrap();
+
+    // Decode the result and verify it still contains the original data
+    let img = image::load_from_memory(&result).unwrap().to_luma8();
+    let mut prepared = rqrr::PreparedImage::prepare(img);
+    let grids = prepared.detect_grids();
+    assert!(!grids.is_empty(), "QR code with logo should still be detectable");
+    let (_meta, content) = grids[0].decode().expect("QR code with logo should still be decodable");
+    assert_eq!(content, data, "Decoded data should match original");
+}
+
+#[test]
+fn test_decode_logo_base64_data_uri() {
+    use qr_service::qr;
+    let img = image::ImageBuffer::from_fn(2, 2, |_, _| image::Rgba([0u8, 0, 0, 255]));
+    let mut buf = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+    let data_uri = format!("data:image/png;base64,{}", B64.encode(buf.into_inner()));
+
+    let decoded = qr::decode_logo_base64(&data_uri).unwrap();
+    assert!(!decoded.is_empty());
+    // Verify it starts with PNG magic bytes
+    assert_eq!(&decoded[0..4], &[0x89, 0x50, 0x4E, 0x47]);
+}
+
+#[test]
+fn test_decode_logo_base64_raw() {
+    use qr_service::qr;
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+    let raw = B64.encode(b"test data");
+    let decoded = qr::decode_logo_base64(&raw).unwrap();
+    assert_eq!(decoded, b"test data");
+}
+
+#[test]
+fn test_decode_logo_base64_invalid() {
+    use qr_service::qr;
+    let result = qr::decode_logo_base64("not valid base64!!!");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_svg_logo_overlay_contains_elements() {
+    use qr_service::qr;
+    let img = image::ImageBuffer::from_fn(4, 4, |_, _| image::Rgba([255u8, 0, 0, 255]));
+    let mut buf = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+
+    let svg = qr::svg_logo_overlay(&buf.into_inner(), 300, 20).unwrap();
+    assert!(svg.contains("<rect "), "Should contain background rect");
+    assert!(svg.contains("<image "), "Should contain image element");
+    assert!(svg.contains("data:image/png;base64,"), "Should contain PNG data URI");
+    assert!(svg.contains("rx="), "Background rect should have rounded corners");
+}

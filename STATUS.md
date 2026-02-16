@@ -169,12 +169,12 @@ The Rust/Rocket backend compiles, runs, and has passing tests. Core QR generatio
   - Better empty states, section titles, and visual hierarchy
   - No backend changes. All 59 tests pass. Commit: 6068061
 
-*Last updated: 2026-02-13 22:10 UTC — Analytics dashboard enhancements. 59 tests total (3 unit + 33 HTTP + 23 integration), zero clippy warnings.*
+*Last updated: 2026-02-14 00:02 UTC — Fixed test flakiness (parallel SQLite init race). 59 tests total (3 unit + 33 HTTP + 23 integration), zero clippy warnings.*
 
 ### Completed (2026-02-13 Daytime — 22:10 UTC)
 
 - **Analytics dashboard enhancements** ✅ — Scan timeline bar chart (scans by day), device breakdown chips (desktop/mobile/bot with percentages), relative time formatting, 4th stat card "Last Activity", "Refresh All" button, per-QR last-scan indicator, copy short URL in detail panel. No backend changes. Commit: ef0f3f3
-- **Note:** Pre-existing test failure in `test_http_batch_generate` — not introduced by this change, needs separate investigation.
+- **Test flakiness fix** ✅ — Root cause: `std::env::set_var(DATABASE_PATH)` is process-global, so parallel tests raced on it causing "database is locked" errors. Added `init_db_with_path()`, updated both test files. Removed `--test-threads=1` from CI. All 59 tests pass 5/5 runs in parallel. Commit: 436922c.
 
 ## Incoming Directions (Work Queue)
 

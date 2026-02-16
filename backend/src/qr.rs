@@ -1,3 +1,5 @@
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use image::{ImageBuffer, Rgba, RgbaImage};
 use qrcode::types::QrError;
 use qrcode::EcLevel;
@@ -406,6 +408,172 @@ pub fn wifi_data(ssid: &str, password: &str, encryption: &str, hidden: bool) -> 
         password.replace(';', "\\;").replace(',', "\\,"),
         if hidden { "true" } else { "false" }
     )
+}
+
+/// Decode a logo from base64 (supports data URI or raw base64).
+/// Returns the raw image bytes.
+pub fn decode_logo_base64(logo: &str) -> Result<Vec<u8>, String> {
+    // Strip data URI prefix if present (e.g., "data:image/png;base64,...")
+    let b64_data = if let Some(comma_pos) = logo.find(',') {
+        let prefix = &logo[..comma_pos];
+        if prefix.starts_with("data:") {
+            &logo[comma_pos + 1..]
+        } else {
+            logo
+        }
+    } else {
+        logo
+    };
+
+    BASE64
+        .decode(b64_data.trim())
+        .map_err(|e| format!("Invalid base64 logo data: {}", e))
+}
+
+/// Overlay a logo image at the center of a QR code PNG.
+/// `logo_data` is raw image bytes (PNG, JPEG, etc.).
+/// `logo_pct` is the percentage of the QR code size the logo should occupy (5-40).
+/// A white rounded-rect background with padding is placed behind the logo.
+pub fn overlay_logo_png(qr_png: &[u8], logo_data: &[u8], logo_pct: u8) -> Result<Vec<u8>, String> {
+    let mut qr_img = image::load_from_memory(qr_png)
+        .map_err(|e| format!("Failed to load QR image: {}", e))?
+        .to_rgba8();
+
+    let logo_img = image::load_from_memory(logo_data)
+        .map_err(|e| format!("Failed to load logo image: {}", e))?
+        .to_rgba8();
+
+    let qr_size = qr_img.width().min(qr_img.height());
+    let pct = (logo_pct as u32).clamp(5, 40);
+    let logo_target = (qr_size * pct) / 100;
+
+    // Resize logo to fit within target size, preserving aspect ratio
+    let (lw, lh) = (logo_img.width(), logo_img.height());
+    let scale = (logo_target as f64 / lw as f64).min(logo_target as f64 / lh as f64);
+    let new_w = (lw as f64 * scale).round() as u32;
+    let new_h = (lh as f64 * scale).round() as u32;
+
+    let resized = image::imageops::resize(&logo_img, new_w, new_h, image::imageops::FilterType::Lanczos3);
+
+    // Calculate center position
+    let padding = (new_w.max(new_h) as f64 * 0.15).round() as u32; // 15% padding
+    let bg_w = new_w + padding * 2;
+    let bg_h = new_h + padding * 2;
+    let bg_x = (qr_img.width().saturating_sub(bg_w)) / 2;
+    let bg_y = (qr_img.height().saturating_sub(bg_h)) / 2;
+    let logo_x = (qr_img.width().saturating_sub(new_w)) / 2;
+    let logo_y = (qr_img.height().saturating_sub(new_h)) / 2;
+
+    // Draw white background with rounded corners behind logo
+    let corner_r = (bg_w.min(bg_h) as f64 * 0.15).round() as u32;
+    for dy in 0..bg_h {
+        for dx in 0..bg_w {
+            let ix = bg_x + dx;
+            let iy = bg_y + dy;
+            if ix < qr_img.width() && iy < qr_img.height() {
+                // Check if pixel is inside rounded rect
+                if is_inside_rounded_rect(dx, dy, bg_w, bg_h, corner_r) {
+                    qr_img.put_pixel(ix, iy, Rgba([255, 255, 255, 255]));
+                }
+            }
+        }
+    }
+
+    // Overlay the logo with alpha blending
+    for (lx, ly, pixel) in resized.enumerate_pixels() {
+        let ix = logo_x + lx;
+        let iy = logo_y + ly;
+        if ix < qr_img.width() && iy < qr_img.height() {
+            let bg_pixel = qr_img.get_pixel(ix, iy);
+            let blended = alpha_blend(bg_pixel, pixel);
+            qr_img.put_pixel(ix, iy, blended);
+        }
+    }
+
+    let mut buf = Cursor::new(Vec::new());
+    qr_img
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| format!("PNG encoding error: {}", e))?;
+
+    Ok(buf.into_inner())
+}
+
+/// Alpha-blend foreground pixel over background pixel.
+fn alpha_blend(bg: &Rgba<u8>, fg: &Rgba<u8>) -> Rgba<u8> {
+    let fa = fg.0[3] as f64 / 255.0;
+    let ba = bg.0[3] as f64 / 255.0;
+    let out_a = fa + ba * (1.0 - fa);
+    if out_a == 0.0 {
+        return Rgba([0, 0, 0, 0]);
+    }
+    let r = ((fg.0[0] as f64 * fa + bg.0[0] as f64 * ba * (1.0 - fa)) / out_a).round() as u8;
+    let g = ((fg.0[1] as f64 * fa + bg.0[1] as f64 * ba * (1.0 - fa)) / out_a).round() as u8;
+    let b = ((fg.0[2] as f64 * fa + bg.0[2] as f64 * ba * (1.0 - fa)) / out_a).round() as u8;
+    Rgba([r, g, b, (out_a * 255.0).round() as u8])
+}
+
+/// Check if a point is inside a rounded rectangle.
+fn is_inside_rounded_rect(x: u32, y: u32, w: u32, h: u32, r: u32) -> bool {
+    // Check four corners
+    let corners = [
+        (r, r),                             // top-left
+        (w.saturating_sub(r + 1), r),       // top-right
+        (r, h.saturating_sub(r + 1)),       // bottom-left
+        (w.saturating_sub(r + 1), h.saturating_sub(r + 1)), // bottom-right
+    ];
+
+    for &(cx, cy) in &corners {
+        let in_corner_x = if cx <= r { x < r } else { x > w.saturating_sub(r + 1) };
+        let in_corner_y = if cy <= r { y < r } else { y > h.saturating_sub(r + 1) };
+
+        if in_corner_x && in_corner_y {
+            let dx = x as f64 - cx as f64;
+            let dy = y as f64 - cy as f64;
+            if dx * dx + dy * dy > (r as f64) * (r as f64) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Build SVG elements for a logo overlay at the center of the QR code.
+/// Returns SVG elements (white background rect + image) to be inserted before </svg>.
+pub fn svg_logo_overlay(logo_data: &[u8], qr_size: u32, logo_pct: u8) -> Result<String, String> {
+    // Detect MIME type from magic bytes
+    let mime = if logo_data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+        "image/png"
+    } else if logo_data.starts_with(&[0xFF, 0xD8]) {
+        "image/jpeg"
+    } else if logo_data.starts_with(b"<svg") || logo_data.starts_with(b"<?xml") {
+        "image/svg+xml"
+    } else if logo_data.starts_with(b"GIF8") {
+        "image/gif"
+    } else if logo_data.starts_with(b"RIFF") {
+        "image/webp"
+    } else {
+        "image/png" // fallback
+    };
+
+    let pct = (logo_pct as f64).clamp(5.0, 40.0);
+    let logo_size = (qr_size as f64 * pct) / 100.0;
+    let padding = logo_size * 0.15;
+    let bg_size = logo_size + padding * 2.0;
+    let bg_x = (qr_size as f64 - bg_size) / 2.0;
+    let bg_y = (qr_size as f64 - bg_size) / 2.0;
+    let logo_x = (qr_size as f64 - logo_size) / 2.0;
+    let logo_y = (qr_size as f64 - logo_size) / 2.0;
+    let corner_r = bg_size * 0.15;
+
+    let b64 = BASE64.encode(logo_data);
+    let data_uri = format!("data:{};base64,{}", mime, b64);
+
+    Ok(format!(
+        r#"<rect x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" rx="{:.2}" ry="{:.2}" fill="white"/>
+<image x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" href="{}"/>"#,
+        bg_x, bg_y, bg_size, bg_size, corner_r, corner_r,
+        logo_x, logo_y, logo_size, logo_size, data_uri
+    ))
 }
 
 /// Generate vCard data string
