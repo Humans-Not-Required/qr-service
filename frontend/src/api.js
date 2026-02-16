@@ -32,14 +32,17 @@ function authRequest(path, manageToken, options = {}) {
   return request(path, { ...options, headers: { ...headers, ...options.headers } });
 }
 
-export async function generateQR({ data, format = 'png', size = 256, style = 'square', fgColor = '000000', bgColor = 'ffffff', errorCorrection = 'M' }) {
+export async function generateQR({ data, format = 'png', size = 256, style = 'square', fgColor = '000000', bgColor = 'ffffff', errorCorrection = 'M', logo, logoSize }) {
+  const body = {
+    data, format, size, style,
+    fg_color: fgColor, bg_color: bgColor,
+    error_correction: errorCorrection,
+  };
+  if (logo) body.logo = logo;
+  if (logoSize !== undefined) body.logo_size = logoSize;
   return request('/qr/generate', {
     method: 'POST',
-    body: JSON.stringify({
-      data, format, size, style,
-      fg_color: fgColor, bg_color: bgColor,
-      error_correction: errorCorrection,
-    }),
+    body: JSON.stringify(body),
   });
 }
 

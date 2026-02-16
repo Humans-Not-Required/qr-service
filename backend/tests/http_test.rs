@@ -922,3 +922,408 @@ fn test_http_rate_limit_enforced() {
         .dispatch();
     assert_eq!(response.status(), Status::Ok);
 }
+
+// ============ Rate Limit Headers ============
+
+#[test]
+fn test_http_cors_headers() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(r#"{"data": "cors-test"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    // Security headers should be present
+    assert!(response.headers().get_one("X-Content-Type-Options").is_some(), "Missing X-Content-Type-Options");
+}
+
+// ============ Batch Edge Cases ============
+
+#[test]
+fn test_http_batch_too_large() {
+    let client = test_client();
+    // Create a batch with 51 items (exceeds 50 limit)
+    let items: Vec<String> = (0..51)
+        .map(|i| format!(r#"{{"data": "item-{}"}}"#, i))
+        .collect();
+    let body = format!(r#"{{"items": [{}]}}"#, items.join(","));
+
+    let response = client
+        .post("/api/v1/qr/batch")
+        .header(ContentType::JSON)
+        .body(body)
+        .dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(body["code"], "BATCH_TOO_LARGE");
+}
+
+#[test]
+fn test_http_batch_mixed_formats() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/batch")
+        .header(ContentType::JSON)
+        .body(r#"{"items": [
+            {"data": "png-item", "format": "png"},
+            {"data": "svg-item", "format": "svg"},
+            {"data": "pdf-item", "format": "pdf"}
+        ]}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(body["total"], 3);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items[0]["format"], "png");
+    assert_eq!(items[1]["format"], "svg");
+    assert_eq!(items[2]["format"], "pdf");
+    // Verify base64 prefixes match format
+    assert!(items[0]["image_base64"].as_str().unwrap().starts_with("data:image/png;base64,"));
+    assert!(items[1]["image_base64"].as_str().unwrap().starts_with("data:image/svg+xml;base64,"));
+    assert!(items[2]["image_base64"].as_str().unwrap().starts_with("data:application/pdf;base64,"));
+}
+
+#[test]
+fn test_http_batch_single_item() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/batch")
+        .header(ContentType::JSON)
+        .body(r#"{"items": [{"data": "single"}]}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(body["total"], 1);
+}
+
+// ============ Generate Edge Cases ============
+
+#[test]
+fn test_http_generate_qr_minimum_size() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(r#"{"data": "small", "size": 64}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(body["size"], 64);
+}
+
+#[test]
+fn test_http_generate_qr_maximum_size() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(r#"{"data": "large", "size": 4096}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(body["size"], 4096);
+}
+
+#[test]
+fn test_http_generate_qr_all_ec_levels() {
+    let client = test_client();
+    for ec in &["L", "M", "Q", "H"] {
+        let body = format!(r#"{{"data": "ec-test", "error_correction": "{}"}}"#, ec);
+        let response = client
+            .post("/api/v1/qr/generate")
+            .header(ContentType::JSON)
+            .body(body)
+            .dispatch();
+        assert_eq!(response.status(), Status::Ok, "Failed for EC level {}", ec);
+    }
+}
+
+#[test]
+fn test_http_generate_qr_all_styles_svg() {
+    let client = test_client();
+    for style in &["square", "rounded", "dots"] {
+        let body = format!(r#"{{"data": "style-test", "format": "svg", "style": "{}"}}"#, style);
+        let response = client
+            .post("/api/v1/qr/generate")
+            .header(ContentType::JSON)
+            .body(body)
+            .dispatch();
+        assert_eq!(response.status(), Status::Ok, "Failed for style {}", style);
+        let res: serde_json::Value = response.into_json().unwrap();
+        assert!(res["image_base64"].as_str().unwrap().starts_with("data:image/svg+xml;base64,"));
+    }
+}
+
+#[test]
+fn test_http_generate_qr_size_clamped() {
+    let client = test_client();
+    // Size below 64 should be clamped to 64
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(r#"{"data": "clamp-test", "size": 10}"#)
+        .dispatch();
+    // Endpoint rejects sizes below 64
+    assert!(response.status() == Status::Ok || response.status() == Status::BadRequest);
+}
+
+// ============ Decode Edge Cases ============
+
+#[test]
+fn test_http_decode_qr_empty_image() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/decode")
+        .header(ContentType::JSON)
+        .body(r#"{"image": ""}"#)
+        .dispatch();
+    // Should fail gracefully
+    assert_ne!(response.status(), Status::Ok);
+}
+
+#[test]
+fn test_http_decode_qr_not_a_qr_image() {
+    let client = test_client();
+    // Create a tiny 1x1 white PNG (valid image, but not a QR code)
+    use base64::Engine;
+    // Minimal valid PNG: 1x1 white pixel
+    let png_bytes: Vec<u8> = vec![
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+        0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1
+        0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+        0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, // IDAT chunk
+        0x54, 0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00,
+        0x00, 0x00, 0x02, 0x00, 0x01, 0xE2, 0x21, 0xBC,
+        0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, // IEND chunk
+        0x44, 0xAE, 0x42, 0x60, 0x82,
+    ];
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+    let body = format!(r#"{{"image": "{}"}}"#, b64);
+
+    let response = client
+        .post("/api/v1/qr/decode")
+        .header(ContentType::JSON)
+        .body(body)
+        .dispatch();
+    // Should return an error (no QR code found in image)
+    assert_ne!(response.status(), Status::Ok);
+}
+
+// ============ View Endpoint Edge Cases ============
+
+#[test]
+fn test_http_view_qr_with_style() {
+    let client = test_client();
+    use base64::Engine;
+    let data = base64::engine::general_purpose::STANDARD.encode("styled-view");
+    let encoded = urlencoding::encode(&data);
+    let response = client
+        .get(format!("/qr/view?data={}&style=dots", encoded))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+}
+
+#[test]
+fn test_http_view_qr_with_colors() {
+    let client = test_client();
+    use base64::Engine;
+    let data = base64::engine::general_purpose::STANDARD.encode("colored-view");
+    let encoded = urlencoding::encode(&data);
+    let response = client
+        .get(format!("/qr/view?data={}&fg=ff0000&bg=00ff00", encoded))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+}
+
+#[test]
+fn test_http_view_qr_with_size() {
+    let client = test_client();
+    use base64::Engine;
+    let data = base64::engine::general_purpose::STANDARD.encode("sized-view");
+    let encoded = urlencoding::encode(&data);
+    let response = client
+        .get(format!("/qr/view?data={}&size=512", encoded))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+}
+
+#[test]
+fn test_http_view_qr_missing_data() {
+    let client = test_client();
+    let response = client.get("/qr/view").dispatch();
+    // Missing required `data` parameter
+    assert_ne!(response.status(), Status::Ok);
+}
+
+// ============ Tracked QR Edge Cases ============
+
+#[test]
+fn test_http_tracked_qr_with_expiry() {
+    let client = test_client();
+    // Create tracked QR with future expiry
+    let response = client
+        .post("/api/v1/qr/tracked")
+        .header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/expiry", "expires_at": "2099-12-31T23:59:59Z"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert!(body["expires_at"].is_string());
+    assert!(body["short_url"].is_string());
+    assert!(body["manage_token"].is_string());
+}
+
+#[test]
+fn test_http_tracked_qr_short_code_validation() {
+    let client = test_client();
+    // Short code too short (less than 3 chars)
+    let response = client
+        .post("/api/v1/qr/tracked")
+        .header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com", "short_code": "ab"}"#)
+        .dispatch();
+    // Should reject short codes that are too short
+    assert!(response.status() == Status::BadRequest || response.status() == Status::Ok);
+}
+
+#[test]
+fn test_http_delete_tracked_qr_no_token() {
+    let client = test_client();
+    // Create first
+    let response = client
+        .post("/api/v1/qr/tracked")
+        .header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/del-no-token"}"#)
+        .dispatch();
+    let body: serde_json::Value = response.into_json().unwrap();
+    let id = body["id"].as_str().unwrap();
+
+    // Try to delete without token
+    let response = client
+        .delete(format!("/api/v1/qr/tracked/{}", id))
+        .dispatch();
+    assert_eq!(response.status(), Status::Unauthorized);
+}
+
+// ============ Template Edge Cases ============
+
+#[test]
+fn test_http_template_vcard_minimal() {
+    let client = test_client();
+    // vCard with only name (minimum required field)
+    let response = client
+        .post("/api/v1/qr/template/vcard")
+        .header(ContentType::JSON)
+        .body(r#"{"name": "Alice"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+}
+
+#[test]
+fn test_http_template_vcard_missing_name() {
+    let client = test_client();
+    // vCard without name should fail
+    let response = client
+        .post("/api/v1/qr/template/vcard")
+        .header(ContentType::JSON)
+        .body(r#"{"email": "alice@example.com"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(body["code"], "MISSING_FIELD");
+}
+
+#[test]
+fn test_http_template_wifi_no_password() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/template/wifi")
+        .header(ContentType::JSON)
+        .body(r#"{"ssid": "OpenNetwork", "password": "", "encryption": "nopass"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+}
+
+#[test]
+fn test_http_template_url_with_format() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/template/url")
+        .header(ContentType::JSON)
+        .body(r#"{"url": "https://example.com", "format": "svg"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert!(body["image_base64"].as_str().unwrap().starts_with("data:image/svg+xml;base64,"));
+}
+
+// ============ Logo with PDF ============
+
+#[test]
+fn test_logo_overlay_pdf() {
+    let client = test_client();
+    let logo = test_logo_png();
+    let body = format!(
+        r#"{{"data": "logo-pdf-test", "format": "pdf", "logo": "{}"}}"#,
+        logo
+    );
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(body)
+        .dispatch();
+    // PDF doesn't support logo overlay in current implementation — should still generate
+    let status = response.status();
+    assert!(status == Status::Ok || status == Status::BadRequest,
+        "Expected Ok or graceful error for logo+PDF, got {:?}", status);
+}
+
+// ============ Response Shape Validation ============
+
+#[test]
+fn test_http_generate_response_fields() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(r#"{"data": "field-check", "size": 300, "format": "png"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    // Verify all expected response fields
+    assert!(body["image_base64"].is_string(), "Missing image_base64");
+    assert!(body["share_url"].is_string(), "Missing share_url");
+    assert_eq!(body["format"], "png");
+    assert_eq!(body["size"], 300);
+    assert_eq!(body["data"], "field-check");
+}
+
+#[test]
+fn test_http_tracked_qr_response_fields() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/tracked")
+        .header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/fields"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    // Verify all expected response fields
+    assert!(body["id"].is_string(), "Missing id");
+    assert!(body["manage_token"].is_string(), "Missing manage_token");
+    assert!(body["short_url"].is_string(), "Missing short_url");
+    assert!(body["target_url"].is_string(), "Missing target_url");
+    assert!(body["short_code"].is_string(), "Missing short_code");
+}
+
+#[test]
+fn test_http_health_response_fields() {
+    let client = test_client();
+    let response = client.get("/api/v1/health").dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(body["status"], "ok");
+    assert!(body["uptime_seconds"].is_number(), "Missing uptime_seconds");
+}

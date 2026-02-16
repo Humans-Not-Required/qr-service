@@ -170,11 +170,37 @@ function GenerateTab({ showToast }) {
   const [fgColor, setFgColor] = useState('#000000');
   const [bgColor, setBgColor] = useState('#ffffff');
   const [ec, setEc] = useState('M');
+  const [logo, setLogo] = useState(null);
+  const [logoPreview, setLogoPreview] = useState(null);
+  const [logoSize, setLogoSize] = useState(20);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const copy = useCopy(showToast);
+
+  const handleLogoFile = (file) => {
+    if (!file) return;
+    if (file.size > 512 * 1024) {
+      setError('Logo must be under 512KB');
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      setError('Logo must be an image file');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setLogo(reader.result);
+      setLogoPreview(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const clearLogo = () => {
+    setLogo(null);
+    setLogoPreview(null);
+  };
 
   const handleGenerate = async (e) => {
     e.preventDefault();
@@ -188,6 +214,8 @@ function GenerateTab({ showToast }) {
         fgColor: fgColor.replace('#', ''),
         bgColor: bgColor.replace('#', ''),
         errorCorrection: ec,
+        logo: logo || undefined,
+        logoSize: logo ? logoSize : undefined,
       });
       setResult(res);
     } catch (err) {
@@ -273,6 +301,42 @@ function GenerateTab({ showToast }) {
                   <input type="text" value={bgColor} onChange={e => setBgColor(e.target.value)} className="input" />
                 </div>
               </div>
+            </div>
+
+            <div className="form-group">
+              <label className="label">Center Logo <span className="hint">(optional, max 512KB)</span></label>
+              <div className="logo-upload">
+                {logoPreview ? (
+                  <div className="logo-preview-row">
+                    <img src={logoPreview} alt="Logo preview" className="logo-preview-img" />
+                    <div className="logo-controls">
+                      <div className="logo-size-row">
+                        <label className="label label--sm">Size: {logoSize}%</label>
+                        <input
+                          type="range"
+                          min={5}
+                          max={40}
+                          value={logoSize}
+                          onChange={e => setLogoSize(+e.target.value)}
+                          className="range-input"
+                        />
+                      </div>
+                      <button type="button" onClick={clearLogo} className="btn btn--ghost btn--sm btn--danger">✕ Remove</button>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="logo-drop-area">
+                    <span className="logo-drop-area__text">📷 Drop or click to add logo</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={e => e.target.files[0] && handleLogoFile(e.target.files[0])}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
+                )}
+              </div>
+              {logo && <p className="hint">EC auto-upgrades to H (30%) for logo reliability.</p>}
             </div>
           </div>
         </div>
@@ -438,11 +502,12 @@ function TemplatesTab({ showToast }) {
   const [ssid, setSsid] = useState('');
   const [password, setPassword] = useState('');
   const [encryption, setEncryption] = useState('WPA');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [org, setOrg] = useState('');
+  const [title, setTitle] = useState('');
+  const [vcardUrl, setVcardUrl] = useState('');
 
   const handleGenerate = async (e) => {
     e.preventDefault();
@@ -452,7 +517,14 @@ function TemplatesTab({ showToast }) {
       let params;
       if (template === 'url') params = { url };
       else if (template === 'wifi') params = { ssid, password, encryption };
-      else params = { first_name: firstName, last_name: lastName, email, phone, organization: org };
+      else {
+        params = { name };
+        if (email) params.email = email;
+        if (phone) params.phone = phone;
+        if (org) params.org = org;
+        if (title) params.title = title;
+        if (vcardUrl) params.url = vcardUrl;
+      }
       const { data: res } = await generateFromTemplate(template, params);
       setResult(res);
     } catch (err) {
@@ -507,27 +579,33 @@ function TemplatesTab({ showToast }) {
 
         {template === 'vcard' && (
           <>
+            <div className="form-group">
+              <label className="label">Full Name</label>
+              <input value={name} onChange={e => setName(e.target.value)} placeholder="John Doe" className="input" />
+            </div>
             <div className="form-row">
               <div className="form-group">
-                <label className="label">First Name</label>
-                <input value={firstName} onChange={e => setFirstName(e.target.value)} className="input" />
+                <label className="label">Email <span className="hint">(optional)</span></label>
+                <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="john@example.com" className="input" />
               </div>
               <div className="form-group">
-                <label className="label">Last Name</label>
-                <input value={lastName} onChange={e => setLastName(e.target.value)} className="input" />
+                <label className="label">Phone <span className="hint">(optional)</span></label>
+                <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1234567890" className="input" />
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="label">Organization <span className="hint">(optional)</span></label>
+                <input value={org} onChange={e => setOrg(e.target.value)} className="input" />
+              </div>
+              <div className="form-group">
+                <label className="label">Title <span className="hint">(optional)</span></label>
+                <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Engineer" className="input" />
               </div>
             </div>
             <div className="form-group">
-              <label className="label">Email</label>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="input" />
-            </div>
-            <div className="form-group">
-              <label className="label">Phone</label>
-              <input value={phone} onChange={e => setPhone(e.target.value)} className="input" />
-            </div>
-            <div className="form-group">
-              <label className="label">Organization</label>
-              <input value={org} onChange={e => setOrg(e.target.value)} className="input" />
+              <label className="label">Website <span className="hint">(optional)</span></label>
+              <input value={vcardUrl} onChange={e => setVcardUrl(e.target.value)} placeholder="https://example.com" className="input" />
             </div>
           </>
         )}

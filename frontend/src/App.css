@@ -1009,6 +1009,69 @@ body {
   }
 }
 
+/* Logo upload */
+.logo-upload {
+  margin-top: 0.25rem;
+}
+.logo-drop-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  border: 2px dashed var(--border, #334155);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.logo-drop-area:hover {
+  border-color: var(--accent, #6366f1);
+  background: rgba(99, 102, 241, 0.05);
+}
+.logo-drop-area__text {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #94a3b8);
+}
+.logo-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem;
+  background: var(--bg-secondary, #1e293b);
+  border-radius: 8px;
+  border: 1px solid var(--border, #334155);
+}
+.logo-preview-img {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #fff;
+  padding: 4px;
+  flex-shrink: 0;
+}
+.logo-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+.logo-size-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.label--sm {
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.range-input {
+  flex: 1;
+  accent-color: var(--accent, #6366f1);
+  height: 4px;
+  cursor: pointer;
+}
+
 /* PDF placeholder */
 .pdf-placeholder {
   display: flex;
