@@ -576,6 +576,186 @@ pub fn svg_logo_overlay(logo_data: &[u8], qr_size: u32, logo_pct: u8) -> Result<
     ))
 }
 
+/// Generate a PDF containing the QR code as vector graphics.
+/// The `size` in options is used as the page size in points (1 pt = 1/72 inch).
+/// Returns raw PDF bytes.
+pub fn generate_pdf(data: &str, options: &QrOptions) -> Result<Vec<u8>, String> {
+    use printpdf::*;
+
+    let code = QrCode::with_error_correction_level(data, options.error_correction)
+        .map_err(|e: QrError| format!("QR encoding error: {}", e))?;
+
+    let modules = code.to_colors();
+    let module_count = code.width() as u32;
+    let quiet_zone = 4u32;
+    let total_modules = module_count + quiet_zone * 2;
+    let page_size_pt = options.size as f32;
+    let module_size_pt = page_size_pt / total_modules as f32;
+
+    // Convert points to mm for page dimensions (printpdf uses Mm for page size)
+    let page_size_mm: Mm = Pt(page_size_pt).into();
+
+    let mut ops: Vec<Op> = Vec::new();
+
+    // Draw background
+    let bg_r = options.bg_color[0] as f32 / 255.0;
+    let bg_g = options.bg_color[1] as f32 / 255.0;
+    let bg_b = options.bg_color[2] as f32 / 255.0;
+
+    ops.push(Op::SetFillColor { col: Color::Rgb(Rgb::new(bg_r, bg_g, bg_b, None)) });
+    ops.push(Op::SetOutlineThickness { pt: Pt(0.0) });
+    let mut bg_rect = Rect::from_xywh(Pt(0.0), Pt(0.0), Pt(page_size_pt), Pt(page_size_pt));
+    bg_rect.mode = Some(PaintMode::Fill);
+    bg_rect.winding_order = Some(WindingOrder::NonZero);
+    ops.push(Op::DrawRectangle { rectangle: bg_rect });
+
+    // Set foreground color
+    let fg_r = options.fg_color[0] as f32 / 255.0;
+    let fg_g = options.fg_color[1] as f32 / 255.0;
+    let fg_b = options.fg_color[2] as f32 / 255.0;
+
+    ops.push(Op::SetFillColor { col: Color::Rgb(Rgb::new(fg_r, fg_g, fg_b, None)) });
+
+    // Draw QR modules
+    // PDF coordinate system: origin at bottom-left, Y goes up
+    for (y, row) in modules.chunks(module_count as usize).enumerate() {
+        for (x, &module) in row.iter().enumerate() {
+            if module == qrcode::Color::Dark {
+                let px = (x as u32 + quiet_zone) as f32 * module_size_pt;
+                // Flip Y: PDF origin is bottom-left, QR origin is top-left
+                let py = page_size_pt - (y as u32 + quiet_zone + 1) as f32 * module_size_pt;
+
+                match options.style {
+                    QrStyle::Dots => {
+                        // Approximate circle with polygon segments
+                        let cx = px + module_size_pt / 2.0;
+                        let cy = py + module_size_pt / 2.0;
+                        let r = module_size_pt / 2.0;
+                        let segments = 24u32;
+                        let circle_points: Vec<LinePoint> = (0..segments)
+                            .map(|i| {
+                                let angle = 2.0 * std::f32::consts::PI * i as f32 / segments as f32;
+                                LinePoint {
+                                    p: Point {
+                                        x: Pt(cx + r * angle.cos()),
+                                        y: Pt(cy + r * angle.sin()),
+                                    },
+                                    bezier: false,
+                                }
+                            })
+                            .collect();
+                        let circle = Polygon {
+                            rings: vec![PolygonRing { points: circle_points }],
+                            mode: PaintMode::Fill,
+                            winding_order: WindingOrder::NonZero,
+                        };
+                        ops.push(Op::DrawPolygon { polygon: circle });
+                    }
+                    QrStyle::Rounded => {
+                        let neighbors = get_neighbors(&modules, module_count as usize, x, y);
+                        let corner_r = module_size_pt * 0.35;
+                        let polygon = build_pdf_rounded_rect(px, py, module_size_pt, module_size_pt, corner_r, &neighbors);
+                        ops.push(Op::DrawPolygon { polygon });
+                    }
+                    QrStyle::Square => {
+                        let mut rect = Rect::from_xywh(Pt(px), Pt(py), Pt(module_size_pt), Pt(module_size_pt));
+                        rect.mode = Some(PaintMode::Fill);
+                        rect.winding_order = Some(WindingOrder::NonZero);
+                        ops.push(Op::DrawRectangle { rectangle: rect });
+                    }
+                }
+            }
+        }
+    }
+
+    // Build document
+    let page = PdfPage::new(page_size_mm, page_size_mm, ops);
+    let mut doc = PdfDocument::new("QR Code");
+    doc.pages.push(page);
+
+    let mut warnings = Vec::new();
+    let pdf_bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
+
+    Ok(pdf_bytes)
+}
+
+/// Build a polygon for a rounded rectangle with selective corner rounding based on neighbors.
+fn build_pdf_rounded_rect(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    r: f32,
+    neighbors: &[bool; 4], // [top, right, bottom, left]
+) -> printpdf::Polygon {
+    use printpdf::*;
+
+    // In QR grid space: neighbors = [top_qr, right_qr, bottom_qr, left_qr]
+    // Y is already flipped when calculating py (PDF bottom-left origin).
+    // PDF "top" of the rect = high Y = QR top neighbor
+    let tl = if !neighbors[0] && !neighbors[3] { r } else { 0.0 };
+    let tr = if !neighbors[0] && !neighbors[1] { r } else { 0.0 };
+    let br = if !neighbors[2] && !neighbors[1] { r } else { 0.0 };
+    let bl = if !neighbors[2] && !neighbors[3] { r } else { 0.0 };
+
+    // If no rounding, return simple polygon rect
+    if tl == 0.0 && tr == 0.0 && br == 0.0 && bl == 0.0 {
+        return Rect::from_xywh(Pt(x), Pt(y), Pt(w), Pt(h)).to_polygon();
+    }
+
+    // Build path with selective corner arcs (approximate arcs with line segments)
+    let arc_segments = 8u32;
+    let mut points: Vec<LinePoint> = Vec::new();
+
+    let lp = |px: f32, py: f32| LinePoint { p: Point { x: Pt(px), y: Pt(py) }, bezier: false };
+
+    // Bottom-left corner (bl radius)
+    if bl > 0.0 {
+        for i in 0..=arc_segments {
+            let angle = std::f32::consts::PI + std::f32::consts::FRAC_PI_2 * i as f32 / arc_segments as f32;
+            points.push(lp(x + bl + bl * angle.cos(), y + bl + bl * angle.sin()));
+        }
+    } else {
+        points.push(lp(x, y));
+    }
+
+    // Bottom-right corner (br radius)
+    if br > 0.0 {
+        for i in 0..=arc_segments {
+            let angle = 3.0 * std::f32::consts::FRAC_PI_2 + std::f32::consts::FRAC_PI_2 * i as f32 / arc_segments as f32;
+            points.push(lp(x + w - br + br * angle.cos(), y + br + br * angle.sin()));
+        }
+    } else {
+        points.push(lp(x + w, y));
+    }
+
+    // Top-right corner (tr radius)
+    if tr > 0.0 {
+        for i in 0..=arc_segments {
+            let angle = std::f32::consts::FRAC_PI_2 * i as f32 / arc_segments as f32;
+            points.push(lp(x + w - tr + tr * angle.cos(), y + h - tr + tr * angle.sin()));
+        }
+    } else {
+        points.push(lp(x + w, y + h));
+    }
+
+    // Top-left corner (tl radius)
+    if tl > 0.0 {
+        for i in 0..=arc_segments {
+            let angle = std::f32::consts::FRAC_PI_2 + std::f32::consts::FRAC_PI_2 * i as f32 / arc_segments as f32;
+            points.push(lp(x + tl + tl * angle.cos(), y + h - tl + tl * angle.sin()));
+        }
+    } else {
+        points.push(lp(x, y + h));
+    }
+
+    Polygon {
+        rings: vec![PolygonRing { points }],
+        mode: PaintMode::Fill,
+        winding_order: WindingOrder::NonZero,
+    }
+}
+
 /// Generate vCard data string
 pub fn vcard_data(
     name: &str,

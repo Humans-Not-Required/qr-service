@@ -3,7 +3,7 @@ import { generateQR, decodeQR, generateFromTemplate, createTrackedQR, getTracked
 import './App.css'
 
 const STYLES = ['square', 'rounded', 'dots'];
-const FORMATS = ['png', 'svg'];
+const FORMATS = ['png', 'svg', 'pdf'];
 const EC_LEVELS = ['L', 'M', 'Q', 'H'];
 const TEMPLATES = ['wifi', 'vcard', 'url'];
 
@@ -290,6 +290,15 @@ function GenerateTab({ showToast }) {
             <div className="qr-preview">
               {result.format === 'svg' ? (
                 <div dangerouslySetInnerHTML={{ __html: atob(result.image_base64.replace('data:image/svg+xml;base64,', '')) }} />
+              ) : result.format === 'pdf' ? (
+                <div className="pdf-placeholder">
+                  <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="12" y="4" width="40" height="56" rx="4" stroke="currentColor" strokeWidth="2" fill="none"/>
+                    <path d="M12 16h40" stroke="currentColor" strokeWidth="1.5"/>
+                    <text x="32" y="44" textAnchor="middle" fill="currentColor" fontSize="14" fontWeight="bold">PDF</text>
+                  </svg>
+                  <p>PDF generated — download below</p>
+                </div>
               ) : (
                 <img src={result.image_base64} alt="Generated QR code" className="qr-image" />
               )}

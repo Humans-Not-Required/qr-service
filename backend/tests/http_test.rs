@@ -162,6 +162,119 @@ fn test_http_generate_qr_invalid_format() {
     assert_eq!(body["code"], "INVALID_FORMAT");
 }
 
+// ============ PDF Format ============
+
+#[test]
+fn test_http_generate_qr_pdf() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(r#"{"data": "https://example.com", "format": "pdf", "size": 256}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert!(body["image_base64"].as_str().unwrap().starts_with("data:application/pdf;base64,"));
+    assert_eq!(body["format"], "pdf");
+    assert_eq!(body["size"], 256);
+    assert_eq!(body["data"], "https://example.com");
+    // Verify it's a valid PDF (starts with %PDF)
+    let b64 = body["image_base64"].as_str().unwrap();
+    let raw = b64.strip_prefix("data:application/pdf;base64,").unwrap();
+    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw).unwrap();
+    assert!(bytes.starts_with(b"%PDF"), "Should start with PDF header");
+}
+
+#[test]
+fn test_http_generate_qr_pdf_styles() {
+    let client = test_client();
+    // Test all three styles produce valid PDFs
+    for style in &["square", "rounded", "dots"] {
+        let body_str = format!(r#"{{"data": "test-{}", "format": "pdf", "size": 128, "style": "{}"}}"#, style, style);
+        let response = client
+            .post("/api/v1/qr/generate")
+            .header(ContentType::JSON)
+            .body(body_str)
+            .dispatch();
+        assert_eq!(response.status(), Status::Ok, "Style {} should succeed", style);
+        let body: serde_json::Value = response.into_json().unwrap();
+        let b64 = body["image_base64"].as_str().unwrap();
+        assert!(b64.starts_with("data:application/pdf;base64,"), "Style {} should produce PDF", style);
+        let raw = b64.strip_prefix("data:application/pdf;base64,").unwrap();
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw).unwrap();
+        assert!(bytes.starts_with(b"%PDF"), "Style {} should have PDF header", style);
+    }
+}
+
+#[test]
+fn test_http_generate_qr_pdf_custom_colors() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(r##"{"data": "colored", "format": "pdf", "fg_color": "#FF0000", "bg_color": "#00FF00"}"##)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert!(body["image_base64"].as_str().unwrap().starts_with("data:application/pdf;base64,"));
+}
+
+#[test]
+fn test_http_batch_generate_pdf() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/batch")
+        .header(ContentType::JSON)
+        .body(r#"{"items": [{"data": "pdf1", "format": "pdf"}, {"data": "pdf2", "format": "pdf", "style": "dots"}]}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert_eq!(body["total"], 2);
+    for item in body["items"].as_array().unwrap() {
+        assert!(item["image_base64"].as_str().unwrap().starts_with("data:application/pdf;base64,"));
+        assert_eq!(item["format"], "pdf");
+    }
+}
+
+#[test]
+fn test_http_template_wifi_pdf() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/template/wifi")
+        .header(ContentType::JSON)
+        .body(r#"{"ssid": "MyNetwork", "password": "secret", "format": "pdf"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert!(body["image_base64"].as_str().unwrap().starts_with("data:application/pdf;base64,"));
+    assert_eq!(body["format"], "pdf");
+}
+
+#[test]
+fn test_http_view_qr_pdf() {
+    let client = test_client();
+    let data = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"hello");
+    let url = format!("/qr/view?data={}&format=pdf", data);
+    let response = client.get(url).dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body = response.into_bytes().unwrap();
+    assert!(body.starts_with(b"%PDF"), "View endpoint should return raw PDF");
+}
+
+#[test]
+fn test_http_tracked_qr_pdf() {
+    let client = test_client();
+    let response = client
+        .post("/api/v1/qr/tracked")
+        .header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com", "format": "pdf"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: serde_json::Value = response.into_json().unwrap();
+    assert!(body["qr"]["image_base64"].as_str().unwrap().starts_with("data:application/pdf;base64,"));
+    assert_eq!(body["qr"]["format"], "pdf");
+}
+
 #[test]
 fn test_http_generate_qr_no_auth_needed() {
     // Verify that generation works without any auth headers

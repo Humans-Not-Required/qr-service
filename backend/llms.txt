@@ -13,7 +13,8 @@
 ## Endpoints
 
 ### Stateless QR (no auth)
-- POST /qr/generate — generate QR code (PNG/SVG, styles: square/rounded/dots)
+- POST /qr/generate — generate QR code (PNG/SVG/PDF, styles: square/rounded/dots)
+  - format: "png" (default), "svg", or "pdf" (vector PDF, ideal for print)
   - Optional: logo (base64/data URI, max 512KB) + logo_size (5-40%, default 20%)
   - Logo overlay auto-upgrades error correction to H for max redundancy
 - POST /qr/decode — decode QR from image

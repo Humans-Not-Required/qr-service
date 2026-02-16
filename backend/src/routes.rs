@@ -198,11 +198,17 @@ pub fn generate_qr(
             }
             (svg.into_bytes(), "image/svg+xml")
         }
+        "pdf" => {
+            let data = qr::generate_pdf(&req.data, &options).map_err(|e| {
+                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+            })?;
+            (data, "application/pdf")
+        }
         _ => {
             return Err((
                 Status::BadRequest,
                 Json(ApiError {
-                    error: "Unsupported format. Use 'png' or 'svg'".to_string(),
+                    error: "Unsupported format. Use 'png', 'svg', or 'pdf'".to_string(),
                     code: "INVALID_FORMAT".to_string(),
                     status: 400,
                 }),
@@ -304,6 +310,10 @@ pub fn batch_generate(
         let (image_data, content_type) = match item.format.as_str() {
             "svg" => match qr::generate_svg(&item.data, &options) {
                 Ok(svg) => (svg.into_bytes(), "image/svg+xml"),
+                Err(_) => continue,
+            },
+            "pdf" => match qr::generate_pdf(&item.data, &options) {
+                Ok(data) => (data, "application/pdf"),
                 Err(_) => continue,
             },
             _ => match qr::generate_png(&item.data, &options) {
@@ -414,6 +424,12 @@ pub fn generate_from_template(
             })?;
             (svg.into_bytes(), "image/svg+xml")
         }
+        "pdf" => {
+            let pdf = qr::generate_pdf(&data, &options).map_err(|e| {
+                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+            })?;
+            (pdf, "application/pdf")
+        }
         _ => {
             let png = qr::generate_png(&data, &options).map_err(|e| {
                 (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
@@ -481,6 +497,12 @@ pub fn view_qr(
                 (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
             })?;
             Ok((ContentType::SVG, svg.into_bytes()))
+        }
+        "pdf" => {
+            let pdf = qr::generate_pdf(&content, &options).map_err(|e| {
+                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+            })?;
+            Ok((ContentType::PDF, pdf))
         }
         _ => {
             let png = qr::generate_png(&content, &options).map_err(|e| {
@@ -584,6 +606,12 @@ pub fn create_tracked_qr(
                 (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
             })?;
             (svg.into_bytes(), "image/svg+xml")
+        }
+        "pdf" => {
+            let pdf = qr::generate_pdf(&short_url, &options).map_err(|e| {
+                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+            })?;
+            (pdf, "application/pdf")
         }
         _ => {
             let png = qr::generate_png(&short_url, &options).map_err(|e| {
