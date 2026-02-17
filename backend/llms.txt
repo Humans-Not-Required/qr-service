@@ -144,3 +144,7 @@ BATCH_TOO_LARGE, INVALID_TEMPLATE, RATE_LIMITED, NOT_FOUND, UNAUTHORIZED, DECODE
 
 ## Source
 https://github.com/Humans-Not-Required/qr-service
+
+## Agent Skills Discovery
+- GET /.well-known/skills/index.json — skills discovery index (Cloudflare RFC)
+- GET /.well-known/skills/qr-service/SKILL.md — integration skill (agentskills.io format)

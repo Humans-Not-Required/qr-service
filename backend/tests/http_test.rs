@@ -41,6 +41,8 @@ fn test_client() -> Client {
             routes![
                 qr_service::routes::redirect_short_url,
                 qr_service::routes::view_qr,
+                qr_service::routes::skills_index,
+                qr_service::routes::skills_skill_md,
             ],
         );
 
@@ -1326,4 +1328,34 @@ fn test_http_health_response_fields() {
     let body: serde_json::Value = response.into_json().unwrap();
     assert_eq!(body["status"], "ok");
     assert!(body["uptime_seconds"].is_number(), "Missing uptime_seconds");
+}
+
+// ============ Well-Known Skills Discovery ============
+
+#[test]
+fn test_skills_index_json() {
+    let client = test_client();
+    let resp = client.get("/.well-known/skills/index.json").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: serde_json::Value = resp.into_json().unwrap();
+    let skills = body["skills"].as_array().unwrap();
+    assert_eq!(skills.len(), 1);
+    assert_eq!(skills[0]["name"], "qr-service");
+    assert!(skills[0]["description"].as_str().unwrap().contains("QR"));
+    let files = skills[0]["files"].as_array().unwrap();
+    assert!(files.contains(&serde_json::json!("SKILL.md")));
+}
+
+#[test]
+fn test_skills_skill_md() {
+    let client = test_client();
+    let resp = client.get("/.well-known/skills/qr-service/SKILL.md").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body = resp.into_string().unwrap();
+    assert!(body.starts_with("---"), "Missing YAML frontmatter");
+    assert!(body.contains("name: qr-service"), "Missing skill name");
+    assert!(body.contains("## Quick Start"), "Missing Quick Start");
+    assert!(body.contains("## Auth Model"), "Missing Auth Model");
+    assert!(body.contains("Logo Overlay"), "Missing logo overlay section");
+    assert!(body.contains("Templates"), "Missing templates section");
 }
