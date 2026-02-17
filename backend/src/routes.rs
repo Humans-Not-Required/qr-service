@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 use std::time::Instant;
 
 use crate::auth::{ClientIp, ManageToken};
-use crate::db::{hash_token, DbPool};
+use crate::db::{hash_token, DbPool, DbPoolExt};
 use crate::models::*;
 use crate::qr;
 use crate::rate_limit::{RateLimitResult, RateLimited, RateLimiter};
@@ -164,25 +164,25 @@ pub fn generate_qr(
 
     let (image_data, content_type) = match req.format.as_str() {
         "png" => {
-            let mut data = qr::generate_png(&req.data, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
+            let mut data = qr::generate_png(&req.data, &options).map_err(|_e| {
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", "QR code generation failed")))
             })?;
             // Overlay logo if provided
             if let Some(ref logo) = logo_data {
-                data = qr::overlay_logo_png(&data, logo, req.logo_size).map_err(|e| {
-                    (Status::InternalServerError, Json(ApiError::new(500, "LOGO_OVERLAY_FAILED", e)))
+                data = qr::overlay_logo_png(&data, logo, req.logo_size).map_err(|_e| {
+                    (Status::InternalServerError, Json(ApiError::new(500, "LOGO_OVERLAY_FAILED", "Logo overlay failed")))
                 })?;
             }
             (data, "image/png")
         }
         "svg" => {
-            let mut svg = qr::generate_svg(&req.data, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
+            let mut svg = qr::generate_svg(&req.data, &options).map_err(|_e| {
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", "QR code generation failed")))
             })?;
             // Overlay logo if provided
             if let Some(ref logo) = logo_data {
-                let overlay = qr::svg_logo_overlay(logo, req.size, req.logo_size).map_err(|e| {
-                    (Status::InternalServerError, Json(ApiError::new(500, "LOGO_OVERLAY_FAILED", e)))
+                let overlay = qr::svg_logo_overlay(logo, req.size, req.logo_size).map_err(|_e| {
+                    (Status::InternalServerError, Json(ApiError::new(500, "LOGO_OVERLAY_FAILED", "Logo overlay failed")))
                 })?;
                 // Insert logo elements before closing </svg> tag
                 if let Some(pos) = svg.rfind("</svg>") {
@@ -192,8 +192,8 @@ pub fn generate_qr(
             (svg.into_bytes(), "image/svg+xml")
         }
         "pdf" => {
-            let data = qr::generate_pdf(&req.data, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
+            let data = qr::generate_pdf(&req.data, &options).map_err(|_e| {
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", "QR code generation failed")))
             })?;
             (data, "application/pdf")
         }
@@ -436,20 +436,20 @@ pub fn generate_from_template(
 
     let (image_data, content_type) = match format.as_str() {
         "svg" => {
-            let svg = qr::generate_svg(&data, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
+            let svg = qr::generate_svg(&data, &options).map_err(|_e| {
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", "QR code generation failed")))
             })?;
             (svg.into_bytes(), "image/svg+xml")
         }
         "pdf" => {
-            let pdf = qr::generate_pdf(&data, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
+            let pdf = qr::generate_pdf(&data, &options).map_err(|_e| {
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", "QR code generation failed")))
             })?;
             (pdf, "application/pdf")
         }
         _ => {
-            let png = qr::generate_png(&data, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
+            let png = qr::generate_png(&data, &options).map_err(|_e| {
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", "QR code generation failed")))
             })?;
             (png, "image/png")
         }
@@ -509,20 +509,20 @@ pub fn view_qr(
 
     match fmt {
         "svg" => {
-            let svg = qr::generate_svg(&content, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
+            let svg = qr::generate_svg(&content, &options).map_err(|_e| {
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", "QR code generation failed")))
             })?;
             Ok((ContentType::SVG, svg.into_bytes()))
         }
         "pdf" => {
-            let pdf = qr::generate_pdf(&content, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
+            let pdf = qr::generate_pdf(&content, &options).map_err(|_e| {
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", "QR code generation failed")))
             })?;
             Ok((ContentType::PDF, pdf))
         }
         _ => {
-            let png = qr::generate_png(&content, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
+            let png = qr::generate_png(&content, &options).map_err(|_e| {
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", "QR code generation failed")))
             })?;
             Ok((ContentType::PNG, png))
         }
@@ -581,7 +581,7 @@ pub fn create_tracked_qr(
     };
 
     {
-        let conn = db.lock().unwrap();
+        let conn = db.conn();
         let exists: bool = conn
             .query_row("SELECT COUNT(*) > 0 FROM tracked_qr WHERE short_code = ?1", rusqlite::params![short_code], |row| row.get(0))
             .unwrap_or(false);
@@ -610,20 +610,20 @@ pub fn create_tracked_qr(
 
     let (image_data, content_type) = match req.format.as_str() {
         "svg" => {
-            let svg = qr::generate_svg(&short_url, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
+            let svg = qr::generate_svg(&short_url, &options).map_err(|_e| {
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", "QR code generation failed")))
             })?;
             (svg.into_bytes(), "image/svg+xml")
         }
         "pdf" => {
-            let pdf = qr::generate_pdf(&short_url, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
+            let pdf = qr::generate_pdf(&short_url, &options).map_err(|_e| {
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", "QR code generation failed")))
             })?;
             (pdf, "application/pdf")
         }
         _ => {
-            let png = qr::generate_png(&short_url, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
+            let png = qr::generate_png(&short_url, &options).map_err(|_e| {
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", "QR code generation failed")))
             })?;
             (png, "image/png")
         }
@@ -635,21 +635,21 @@ pub fn create_tracked_qr(
     let manage_token_hash_val = hash_token(&manage_token);
     let image_base64 = format!("data:{};base64,{}", content_type, BASE64.encode(&image_data));
 
-    let conn = db.lock().unwrap();
+    let conn = db.conn();
 
     conn.execute(
         "INSERT INTO qr_codes (id, data, format, size, fg_color, bg_color, error_correction, style, image_data) 
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         rusqlite::params![qr_id, short_url, req.format, req.size, req.fg_color, req.bg_color, req.error_correction, req.style, image_data],
-    ).map_err(|e| {
-        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", format!("Failed to store QR code: {}", e))))
+    ).map_err(|_e| {
+        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", "Internal server error")))
     })?;
 
     conn.execute(
         "INSERT INTO tracked_qr (id, qr_id, short_code, target_url, manage_token_hash, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![tracked_id, qr_id, short_code, req.target_url, manage_token_hash_val, req.expires_at],
-    ).map_err(|e| {
-        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", format!("Failed to create tracked QR: {}", e))))
+    ).map_err(|_e| {
+        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", "Internal server error")))
     })?;
 
     let created_at = conn
@@ -688,7 +688,7 @@ pub fn get_tracked_qr_stats(
     token: ManageToken,
     db: &State<DbPool>,
 ) -> Result<Json<TrackedQrStatsResponse>, (Status, Json<ApiError>)> {
-    let conn = db.lock().unwrap();
+    let conn = db.conn();
     let token_hash = hash_token(&token.0);
 
     let tracked = conn.query_row(
@@ -703,14 +703,14 @@ pub fn get_tracked_qr_stats(
 
     let mut stmt = conn.prepare(
         "SELECT id, scanned_at, user_agent, referrer FROM scan_events WHERE tracked_qr_id = ?1 ORDER BY scanned_at DESC LIMIT 100",
-    ).map_err(|e| {
-        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", format!("Database error: {}", e))))
+    ).map_err(|_e| {
+        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", "Internal server error")))
     })?;
 
     let recent_scans = stmt.query_map(rusqlite::params![id], |row| {
         Ok(ScanEventResponse { id: row.get(0)?, scanned_at: row.get(1)?, user_agent: row.get(2)?, referrer: row.get(3)? })
-    }).map_err(|e| {
-        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", format!("Query error: {}", e))))
+    }).map_err(|_e| {
+        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", "Internal server error")))
     })?.filter_map(|r| r.ok()).collect();
 
     Ok(Json(TrackedQrStatsResponse {
@@ -725,7 +725,7 @@ pub fn delete_tracked_qr(
     token: ManageToken,
     db: &State<DbPool>,
 ) -> Result<Json<serde_json::Value>, (Status, Json<ApiError>)> {
-    let conn = db.lock().unwrap();
+    let conn = db.conn();
     let token_hash = hash_token(&token.0);
 
     let qr_id: String = conn.query_row(
@@ -766,7 +766,7 @@ pub fn redirect_short_url(
     db: &State<DbPool>,
     meta: ScanMeta,
 ) -> Result<Redirect, (Status, Json<ApiError>)> {
-    let conn = db.lock().unwrap();
+    let conn = db.conn();
 
     let result = conn.query_row(
         "SELECT id, target_url, expires_at FROM tracked_qr WHERE short_code = ?1",

@@ -3,6 +3,17 @@ use std::sync::Mutex;
 
 pub type DbPool = Mutex<Connection>;
 
+/// Extension trait for DbPool to recover from mutex poison
+pub trait DbPoolExt {
+    fn conn(&self) -> std::sync::MutexGuard<'_, Connection>;
+}
+
+impl DbPoolExt for DbPool {
+    fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
 pub fn init_db() -> Result<DbPool> {
     let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "qr_service.db".to_string());
     init_db_with_path(&db_path)
