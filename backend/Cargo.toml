@@ -27,14 +27,14 @@ base64 = "0.22"
 sha2 = "0.10"
 rand = "0.8"
 tokio = { version = "1", features = ["full"] }
-rqrr = "0.8"
+rqrr = "0.10"
 dotenvy = "0.15"
 urlencoding = "2"
 printpdf = "0.9"
 
 [dev-dependencies]
 qrcode = "0.14"
-rqrr = "0.8"
+rqrr = "0.10"
 image = "0.25"
 uuid = { version = "1", features = ["v4"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
