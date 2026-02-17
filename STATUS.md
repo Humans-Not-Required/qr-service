@@ -52,6 +52,8 @@ Stateless QR code generation/decoding service with tracked QR analytics, logo ov
 - React 18 + Vite
 - Port: 3001 external, 8000 internal
 
+- ✅ **Python SDK** — Complete zero-dependency Python client library (`sdk/python/qr_service.py`). Covers all API endpoints (health, generate, decode, batch, templates, tracked QR CRUD, discovery). Typed error hierarchy (ValidationError, NotFoundError, RateLimitError, GoneError, ServerError). Convenience helpers (save_qr, image_bytes, generate_png/svg/pdf). Env config (QR_SERVICE_URL). 74 integration tests.
+
 ### What's Next
 
 - All roadmap items complete — feature-complete

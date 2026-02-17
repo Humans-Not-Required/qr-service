@@ -14,3 +14,4 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+sdk/python/__pycache__/

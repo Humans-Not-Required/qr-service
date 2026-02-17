@@ -78,3 +78,7 @@ Current implementation requires `AuthenticatedKey` on every route. Changes neede
 ## Rate Limiting
 
 Keep basic IP-based rate limiting to prevent abuse. No auth needed — just throttle by IP address. Generous limits (e.g., 100 requests/minute per IP).
+
+## Python SDK
+
+Zero-dependency Python client (`sdk/python/qr_service.py`). Covers all API endpoints: generate (PNG/SVG/PDF), decode, batch, templates (WiFi/vCard/URL), tracked QR CRUD, and discovery (llms.txt, OpenAPI, well-known skills). Typed error hierarchy. Convenience helpers for file save and byte extraction. 74 integration tests.
