@@ -5,6 +5,7 @@
 #[macro_use]
 extern crate rocket;
 
+use base64::Engine;
 use rocket::http::{ContentType, Header, Status};
 use rocket::local::blocking::Client;
 use std::time::Duration;
@@ -20,7 +21,6 @@ fn test_client() -> Client {
     let rocket = rocket::build()
         .manage(db)
         .manage(limiter)
-        .attach(qr_service::rate_limit::RateLimitHeaders)
         .mount(
             "/api/v1",
             routes![
@@ -911,7 +911,6 @@ fn test_http_rate_limit_enforced() {
     let rocket = rocket::build()
         .manage(db)
         .manage(limiter)
-        .attach(qr_service::rate_limit::RateLimitHeaders)
         .mount("/api/v1", routes![qr_service::routes::generate_qr]);
 
     let client = Client::tracked(rocket).expect("valid rocket");
@@ -1358,4 +1357,252 @@ fn test_skills_skill_md() {
     assert!(body.contains("## Auth Model"), "Missing Auth Model");
     assert!(body.contains("Logo Overlay"), "Missing logo overlay section");
     assert!(body.contains("Templates"), "Missing templates section");
+}
+
+// ============ Rate Limit Response Headers ============
+
+#[test]
+fn test_rate_limit_headers_on_generate() {
+    let client = test_client();
+    let resp = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(r#"{"data": "header-test"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let limit = resp.headers().get_one("X-RateLimit-Limit").expect("Missing X-RateLimit-Limit");
+    let remaining = resp.headers().get_one("X-RateLimit-Remaining").expect("Missing X-RateLimit-Remaining");
+    let reset = resp.headers().get_one("X-RateLimit-Reset").expect("Missing X-RateLimit-Reset");
+    assert_eq!(limit, "100");
+    assert!(remaining.parse::<u64>().unwrap() <= 100);
+    assert!(reset.parse::<u64>().unwrap() > 0);
+}
+
+#[test]
+fn test_rate_limit_headers_on_batch() {
+    let client = test_client();
+    let resp = client
+        .post("/api/v1/qr/batch")
+        .header(ContentType::JSON)
+        .body(r#"{"items": [{"data": "batch-rl-test"}]}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    assert!(resp.headers().get_one("X-RateLimit-Limit").is_some(), "Missing X-RateLimit-Limit on batch");
+    assert!(resp.headers().get_one("X-RateLimit-Remaining").is_some(), "Missing X-RateLimit-Remaining on batch");
+    assert!(resp.headers().get_one("X-RateLimit-Reset").is_some(), "Missing X-RateLimit-Reset on batch");
+}
+
+#[test]
+fn test_rate_limit_headers_on_template() {
+    let client = test_client();
+    let resp = client
+        .post("/api/v1/qr/template/wifi")
+        .header(ContentType::JSON)
+        .body(r#"{"ssid": "TestNet", "password": "secret"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    assert!(resp.headers().get_one("X-RateLimit-Limit").is_some(), "Missing X-RateLimit-Limit on template");
+    assert!(resp.headers().get_one("X-RateLimit-Remaining").is_some(), "Missing X-RateLimit-Remaining on template");
+}
+
+#[test]
+fn test_rate_limit_headers_on_decode() {
+    let client = test_client();
+    // First generate a QR to decode
+    let gen_resp = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(r#"{"data": "decode-rl-test"}"#)
+        .dispatch();
+    let gen_body: serde_json::Value = gen_resp.into_json().unwrap();
+    let b64 = gen_body["image_base64"].as_str().unwrap();
+    let raw = b64.strip_prefix("data:image/png;base64,").unwrap();
+    let png_bytes = base64::engine::general_purpose::STANDARD.decode(raw).unwrap();
+
+    let resp = client
+        .post("/api/v1/qr/decode")
+        .body(png_bytes)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    assert!(resp.headers().get_one("X-RateLimit-Limit").is_some(), "Missing X-RateLimit-Limit on decode");
+    assert!(resp.headers().get_one("X-RateLimit-Remaining").is_some(), "Missing X-RateLimit-Remaining on decode");
+}
+
+#[test]
+fn test_rate_limit_429_includes_retry_info() {
+    // Custom client with tiny rate limit
+    let db_path = format!("/tmp/qr_rl_429_test_{}.db", uuid::Uuid::new_v4());
+    std::env::set_var("DATABASE_PATH", &db_path);
+    std::env::set_var("BASE_URL", "http://localhost:8000");
+
+    let db = qr_service::db::init_db_with_path(&db_path).expect("DB");
+    let limiter = qr_service::rate_limit::RateLimiter::new(Duration::from_secs(3600));
+
+    let rocket = rocket::build()
+        .manage(db)
+        .manage(limiter)
+        .mount("/api/v1", routes![qr_service::routes::generate_qr]);
+
+    let client = Client::tracked(rocket).expect("valid rocket");
+
+    // Exhaust the limit
+    for _ in 0..100 {
+        client.post("/api/v1/qr/generate")
+            .header(ContentType::JSON)
+            .body(r#"{"data": "exhaust"}"#)
+            .dispatch();
+    }
+
+    // 101st request should be 429
+    let resp = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(r#"{"data": "over-limit"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::TooManyRequests);
+    let body: serde_json::Value = resp.into_json().unwrap();
+    assert_eq!(body["code"], "RATE_LIMIT_EXCEEDED");
+    assert!(body["retry_after_secs"].as_u64().is_some(), "Missing retry_after_secs in 429 body");
+    assert_eq!(body["limit"], 100);
+    assert_eq!(body["remaining"], 0);
+}
+
+// ============ Batch Logo Overlay ============
+
+#[test]
+fn test_batch_logo_overlay_png() {
+    let client = test_client();
+
+    // Create a small 10x10 red PNG for the logo
+    let mut img = image::RgbaImage::new(10, 10);
+    for pixel in img.pixels_mut() {
+        *pixel = image::Rgba([255, 0, 0, 255]);
+    }
+    let mut png_bytes = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(std::io::Cursor::new(&mut png_bytes));
+    image::ImageEncoder::write_image(
+        encoder,
+        img.as_raw(),
+        10, 10,
+        image::ExtendedColorType::Rgba8,
+    ).unwrap();
+    let logo_b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+
+    let body = serde_json::json!({
+        "items": [{
+            "data": "https://example.com/batch-logo",
+            "format": "png",
+            "logo": logo_b64,
+            "logo_size": 20
+        }]
+    });
+
+    let resp = client
+        .post("/api/v1/qr/batch")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    assert_eq!(result["total"], 1);
+
+    // Decode the generated QR and verify it's still scannable
+    let b64_str = result["items"][0]["image_base64"].as_str().unwrap();
+    let raw = b64_str.strip_prefix("data:image/png;base64,").unwrap();
+    let qr_png = base64::engine::general_purpose::STANDARD.decode(raw).unwrap();
+    let qr_img = image::load_from_memory(&qr_png).unwrap().to_luma8();
+    let mut prepared = rqrr::PreparedImage::prepare(qr_img);
+    let grids = prepared.detect_grids();
+    assert!(!grids.is_empty(), "QR code with logo should still be scannable");
+    let (_, content) = grids[0].decode().unwrap();
+    assert_eq!(content, "https://example.com/batch-logo");
+}
+
+#[test]
+fn test_batch_logo_overlay_svg() {
+    let client = test_client();
+
+    // Create a small logo
+    let mut img = image::RgbaImage::new(10, 10);
+    for pixel in img.pixels_mut() {
+        *pixel = image::Rgba([0, 0, 255, 255]);
+    }
+    let mut png_bytes = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(std::io::Cursor::new(&mut png_bytes));
+    image::ImageEncoder::write_image(
+        encoder,
+        img.as_raw(),
+        10, 10,
+        image::ExtendedColorType::Rgba8,
+    ).unwrap();
+    let logo_b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+
+    let body = serde_json::json!({
+        "items": [{
+            "data": "https://example.com/batch-svg-logo",
+            "format": "svg",
+            "logo": logo_b64,
+            "logo_size": 15
+        }]
+    });
+
+    let resp = client
+        .post("/api/v1/qr/batch")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    assert_eq!(result["total"], 1);
+    let b64_str = result["items"][0]["image_base64"].as_str().unwrap();
+    let raw = b64_str.strip_prefix("data:image/svg+xml;base64,").unwrap();
+    let svg_bytes = base64::engine::general_purpose::STANDARD.decode(raw).unwrap();
+    let svg_str = String::from_utf8(svg_bytes).unwrap();
+    // SVG should contain the embedded image element from logo overlay
+    assert!(svg_str.contains("<image"), "SVG batch output should contain logo <image> element");
+}
+
+#[test]
+fn test_batch_without_logo_unchanged() {
+    let client = test_client();
+
+    let body = serde_json::json!({
+        "items": [
+            {"data": "no-logo-1"},
+            {"data": "no-logo-2", "format": "svg"}
+        ]
+    });
+
+    let resp = client
+        .post("/api/v1/qr/batch")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    assert_eq!(result["total"], 2);
+    // Both should generate without errors — logo field absent
+    assert!(result["items"][0]["image_base64"].as_str().unwrap().starts_with("data:image/png;base64,"));
+    assert!(result["items"][1]["image_base64"].as_str().unwrap().starts_with("data:image/svg+xml;base64,"));
+}
+
+#[test]
+fn test_rate_limit_remaining_decrements() {
+    let client = test_client();
+
+    let resp1 = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(r#"{"data": "decrement-1"}"#)
+        .dispatch();
+    let rem1: u64 = resp1.headers().get_one("X-RateLimit-Remaining").unwrap().parse().unwrap();
+
+    let resp2 = client
+        .post("/api/v1/qr/generate")
+        .header(ContentType::JSON)
+        .body(r#"{"data": "decrement-2"}"#)
+        .dispatch();
+    let rem2: u64 = resp2.headers().get_one("X-RateLimit-Remaining").unwrap().parse().unwrap();
+
+    assert!(rem2 < rem1, "Remaining should decrement: {} should be less than {}", rem2, rem1);
 }

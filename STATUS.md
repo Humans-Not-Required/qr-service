@@ -2,7 +2,7 @@
 
 ## Current State: Feature-Complete ✅
 
-Stateless QR code generation/decoding service with tracked QR analytics, logo overlay, PDF output, and React frontend. All 111 tests passing, zero clippy warnings, CI green.
+Stateless QR code generation/decoding service with tracked QR analytics, logo overlay, PDF output, and React frontend. All 122 tests passing, zero clippy warnings, CI green.
 
 ### What's Done
 
@@ -42,7 +42,7 @@ Stateless QR code generation/decoding service with tracked QR analytics, logo ov
 - **Discovery:** `/api/v1/openapi.json`, `/llms.txt` (130 lines, comprehensive)
 - **Docker:** Multi-stage build (frontend + backend), unified serving on single port
 - **CI/CD:** GitHub Actions → ghcr.io + Watchtower auto-deploy
-- **Tests:** 111 total (77 HTTP + 28 integration + 3 unit + 3 lib), zero clippy warnings
+- **Tests:** 122 total (88 HTTP + 28 integration + 3 unit + 3 lib), zero clippy warnings
 
 ### Tech Stack
 
@@ -64,11 +64,12 @@ Stateless QR code generation/decoding service with tracked QR analytics, logo ov
 - CORS wide open (all origins) — tighten for production
 - BASE_URL defaults to `http://localhost:8000` — must be set in production
 - Rate limiter state is in-memory — resets on restart
-- Rate limit response headers not wired to stateless endpoints (IP-based limiter doesn't set request-local cache — enforcement works, headers don't)
-- Batch endpoint does NOT apply logo overlay (uses generate functions directly)
+- ~~Rate limit response headers not wired to stateless endpoints~~ ✅ Fixed — `RateLimited<T>` responder attaches X-RateLimit-Limit/Remaining/Reset headers on all rate-limited endpoints. 429 responses include retry_after_secs/limit/remaining in body.
+- ~~Batch endpoint does NOT apply logo overlay~~ ✅ Fixed — batch now supports logo field with auto EC-H upgrade, PNG overlay, and SVG embedded image. PDF batch still skips logo (no logo support in PDF renderer).
 
 ### Recent Completed
 
+- **Rate limit headers + batch logo overlay bug fixes** (2026-02-17) — Fixed two documented bugs: (1) Rate limit response headers (X-RateLimit-Limit/Remaining/Reset) now attached to all stateless endpoints via `RateLimited<T>` responder pattern, replacing the broken fairing approach. 429 responses include retry_after_secs/limit/remaining in body. (2) Batch endpoint now applies logo overlay (PNG alpha-blend, SVG embedded image) with auto EC-H upgrade, matching single-generate behavior. Extended `ApiError` with optional rate limit fields. Removed dead `RateLimitHeaders` fairing. 9 new tests (122 total). Commit: pending.
 - **Logo overlay UI** (2026-02-16) — Frontend file picker, preview, size slider (5-40%), EC upgrade notice. Fixed vCard template fields to match API (name, not first_name/last_name). Added title + website vCard fields. 
 - **26 new tests** (2026-02-16) — Batch edge cases (>50 rejected, mixed formats, single item), generate edge cases (min/max size, all EC levels, all styles SVG), decode edge cases (empty image, non-QR image), view params (style, colors, size, missing data), tracked QR (expiry, short code validation, delete without token), template edge cases (vcard minimal/missing, wifi nopass, url SVG), logo+PDF, response field validation. Commit: 87d4980.
 - **PDF output format** (2026-02-16) — Vector PDF via printpdf. 7 new tests.
@@ -77,7 +78,7 @@ Stateless QR code generation/decoding service with tracked QR analytics, logo ov
 - **Analytics dashboard enhancements** (2026-02-13) — Scan timeline, device breakdown, relative times.
 - **Full UI reevaluation** (2026-02-11) — CSS extraction, responsive design, toast system, animations.
 
-*Last updated: 2026-02-16 04:15 UTC. 111 tests, zero clippy warnings, CI green.*
+*Last updated: 2026-02-17 03:30 UTC. 122 tests, zero clippy warnings, CI green.*
 
 ## Incoming Directions (Work Queue)
 

@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::Header;
-use rocket::{Request, Response};
+use rocket::response::Responder;
+use rocket::Request;
 
 /// Fixed-window rate limiter.
 ///
@@ -30,28 +30,31 @@ pub struct RateLimitResult {
     pub reset_secs: u64,
 }
 
-/// Rocket fairing that attaches rate limit headers to every response.
-/// Reads `RateLimitResult` from request-local state (set by the auth guard).
-pub struct RateLimitHeaders;
+/// Wrapper responder that attaches rate limit headers to any inner response.
+///
+/// Use this instead of the fairing when you have the `RateLimitResult` available
+/// in the route handler (e.g. from `check_ip_rate`).
+pub struct RateLimited<T> {
+    pub inner: T,
+    pub rate_limit: RateLimitResult,
+}
 
-#[rocket::async_trait]
-impl Fairing for RateLimitHeaders {
-    fn info(&self) -> Info {
-        Info {
-            name: "Rate Limit Response Headers",
-            kind: Kind::Response,
-        }
-    }
-
-    async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
-        if let Some(rl) = request.local_cache(|| Option::<RateLimitResult>::None) {
-            response.set_header(Header::new("X-RateLimit-Limit", rl.limit.to_string()));
-            response.set_header(Header::new(
-                "X-RateLimit-Remaining",
-                rl.remaining.to_string(),
-            ));
-            response.set_header(Header::new("X-RateLimit-Reset", rl.reset_secs.to_string()));
-        }
+impl<'r, 'o: 'r, T: Responder<'r, 'o>> Responder<'r, 'o> for RateLimited<T> {
+    fn respond_to(self, request: &'r Request<'_>) -> rocket::response::Result<'o> {
+        let mut response = self.inner.respond_to(request)?;
+        response.set_header(Header::new(
+            "X-RateLimit-Limit",
+            self.rate_limit.limit.to_string(),
+        ));
+        response.set_header(Header::new(
+            "X-RateLimit-Remaining",
+            self.rate_limit.remaining.to_string(),
+        ));
+        response.set_header(Header::new(
+            "X-RateLimit-Reset",
+            self.rate_limit.reset_secs.to_string(),
+        ));
+        Ok(response)
     }
 }
 

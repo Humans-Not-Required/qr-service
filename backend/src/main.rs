@@ -35,7 +35,7 @@ fn rocket() -> _ {
 
     let mut build = rocket::build()
         .attach(cors)
-        .attach(rate_limit::RateLimitHeaders)
+        // Rate limit headers now attached via RateLimited<T> responder per-route
         .attach(AdHoc::on_ignite("Database", |rocket| async {
             let db = db::init_db().expect("Failed to initialize database");
             rocket.manage(db)

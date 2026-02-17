@@ -13,15 +13,21 @@ use crate::auth::{ClientIp, ManageToken};
 use crate::db::{hash_token, DbPool};
 use crate::models::*;
 use crate::qr;
-use crate::rate_limit::RateLimiter;
+use crate::rate_limit::{RateLimitResult, RateLimited, RateLimiter};
 
 static START_TIME: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 // Default IP rate limit: 100 requests per window
 const IP_RATE_LIMIT: u64 = 100;
 
-/// Check IP rate limit and return error if exceeded.
-fn check_ip_rate(ip: &ClientIp, limiter: &RateLimiter) -> Result<(), (Status, Json<ApiError>)> {
+/// Check IP rate limit and return the result for header attachment.
+/// On success, returns the `RateLimitResult` so callers can wrap their
+/// response in `RateLimited<T>` for proper header emission.
+/// On failure, returns a 429 with retry info in the body.
+fn check_ip_rate(
+    ip: &ClientIp,
+    limiter: &RateLimiter,
+) -> Result<RateLimitResult, (Status, Json<ApiError>)> {
     let key = format!("ip:{}", ip.0);
     let result = limiter.check(&key, IP_RATE_LIMIT);
     if !result.allowed {
@@ -31,10 +37,13 @@ fn check_ip_rate(ip: &ClientIp, limiter: &RateLimiter) -> Result<(), (Status, Js
                 error: "Rate limit exceeded. Try again later.".to_string(),
                 code: "RATE_LIMIT_EXCEEDED".to_string(),
                 status: 429,
+                retry_after_secs: Some(result.reset_secs),
+                limit: Some(result.limit),
+                remaining: Some(result.remaining),
             }),
         ));
     }
-    Ok(())
+    Ok(result)
 }
 
 /// Build a stateless share URL that encodes QR params in the URL itself.
@@ -88,29 +97,21 @@ pub fn generate_qr(
     req: Json<GenerateRequest>,
     ip: ClientIp,
     limiter: &State<RateLimiter>,
-) -> Result<Json<QrResponse>, (Status, Json<ApiError>)> {
-    check_ip_rate(&ip, limiter)?;
+) -> Result<RateLimited<Json<QrResponse>>, (Status, Json<ApiError>)> {
+    let rl = check_ip_rate(&ip, limiter)?;
     let req = req.into_inner();
 
     if req.data.is_empty() {
         return Err((
             Status::BadRequest,
-            Json(ApiError {
-                error: "Data field cannot be empty".to_string(),
-                code: "EMPTY_DATA".to_string(),
-                status: 400,
-            }),
+            Json(ApiError::new(400, "EMPTY_DATA", "Data field cannot be empty")),
         ));
     }
 
     if req.size < 64 || req.size > 4096 {
         return Err((
             Status::BadRequest,
-            Json(ApiError {
-                error: "Size must be between 64 and 4096".to_string(),
-                code: "INVALID_SIZE".to_string(),
-                status: 400,
-            }),
+            Json(ApiError::new(400, "INVALID_SIZE", "Size must be between 64 and 4096")),
         ));
     }
 
@@ -118,11 +119,7 @@ pub fn generate_qr(
     if req.logo_size < 5 || req.logo_size > 40 {
         return Err((
             Status::BadRequest,
-            Json(ApiError {
-                error: "logo_size must be between 5 and 40 (percentage)".to_string(),
-                code: "INVALID_LOGO_SIZE".to_string(),
-                status: 400,
-            }),
+            Json(ApiError::new(400, "INVALID_LOGO_SIZE", "logo_size must be between 5 and 40 (percentage)")),
         ));
     }
 
@@ -130,16 +127,12 @@ pub fn generate_qr(
     let logo_data = match &req.logo {
         Some(logo_str) => {
             let data = qr::decode_logo_base64(logo_str).map_err(|e| {
-                (Status::BadRequest, Json(ApiError { error: e, code: "INVALID_LOGO".to_string(), status: 400 }))
+                (Status::BadRequest, Json(ApiError::new(400, "INVALID_LOGO", e)))
             })?;
             if data.len() > 512 * 1024 {
                 return Err((
                     Status::BadRequest,
-                    Json(ApiError {
-                        error: "Logo image must be under 512KB".to_string(),
-                        code: "LOGO_TOO_LARGE".to_string(),
-                        status: 400,
-                    }),
+                    Json(ApiError::new(400, "LOGO_TOO_LARGE", "Logo image must be under 512KB")),
                 ));
             }
             Some(data)
@@ -148,10 +141,10 @@ pub fn generate_qr(
     };
 
     let fg_color = qr::parse_hex_color(&req.fg_color).map_err(|e| {
-        (Status::BadRequest, Json(ApiError { error: e, code: "INVALID_FG_COLOR".to_string(), status: 400 }))
+        (Status::BadRequest, Json(ApiError::new(400, "INVALID_FG_COLOR", e)))
     })?;
     let bg_color = qr::parse_hex_color(&req.bg_color).map_err(|e| {
-        (Status::BadRequest, Json(ApiError { error: e, code: "INVALID_BG_COLOR".to_string(), status: 400 }))
+        (Status::BadRequest, Json(ApiError::new(400, "INVALID_BG_COLOR", e)))
     })?;
 
     // Force EC level H when logo is present for maximum redundancy
@@ -172,24 +165,24 @@ pub fn generate_qr(
     let (image_data, content_type) = match req.format.as_str() {
         "png" => {
             let mut data = qr::generate_png(&req.data, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
             })?;
             // Overlay logo if provided
             if let Some(ref logo) = logo_data {
                 data = qr::overlay_logo_png(&data, logo, req.logo_size).map_err(|e| {
-                    (Status::InternalServerError, Json(ApiError { error: e, code: "LOGO_OVERLAY_FAILED".to_string(), status: 500 }))
+                    (Status::InternalServerError, Json(ApiError::new(500, "LOGO_OVERLAY_FAILED", e)))
                 })?;
             }
             (data, "image/png")
         }
         "svg" => {
             let mut svg = qr::generate_svg(&req.data, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
             })?;
             // Overlay logo if provided
             if let Some(ref logo) = logo_data {
                 let overlay = qr::svg_logo_overlay(logo, req.size, req.logo_size).map_err(|e| {
-                    (Status::InternalServerError, Json(ApiError { error: e, code: "LOGO_OVERLAY_FAILED".to_string(), status: 500 }))
+                    (Status::InternalServerError, Json(ApiError::new(500, "LOGO_OVERLAY_FAILED", e)))
                 })?;
                 // Insert logo elements before closing </svg> tag
                 if let Some(pos) = svg.rfind("</svg>") {
@@ -200,18 +193,14 @@ pub fn generate_qr(
         }
         "pdf" => {
             let data = qr::generate_pdf(&req.data, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
             })?;
             (data, "application/pdf")
         }
         _ => {
             return Err((
                 Status::BadRequest,
-                Json(ApiError {
-                    error: "Unsupported format. Use 'png', 'svg', or 'pdf'".to_string(),
-                    code: "INVALID_FORMAT".to_string(),
-                    status: 400,
-                }),
+                Json(ApiError::new(400, "INVALID_FORMAT", "Unsupported format. Use 'png', 'svg', or 'pdf'")),
             ));
         }
     };
@@ -219,13 +208,16 @@ pub fn generate_qr(
     let image_base64 = format!("data:{};base64,{}", content_type, BASE64.encode(&image_data));
     let share_url = build_share_url(&req.data, req.size, &req.fg_color, &req.bg_color, &req.format, &req.style);
 
-    Ok(Json(QrResponse {
-        image_base64,
-        share_url,
-        format: req.format,
-        size: req.size,
-        data: req.data,
-    }))
+    Ok(RateLimited {
+        inner: Json(QrResponse {
+            image_base64,
+            share_url,
+            format: req.format,
+            size: req.size,
+            data: req.data,
+        }),
+        rate_limit: rl,
+    })
 }
 
 #[post("/qr/decode", data = "<data>")]
@@ -233,32 +225,27 @@ pub fn decode_qr(
     data: Vec<u8>,
     ip: ClientIp,
     limiter: &State<RateLimiter>,
-) -> Result<Json<DecodeResponse>, (Status, Json<ApiError>)> {
-    check_ip_rate(&ip, limiter)?;
+) -> Result<RateLimited<Json<DecodeResponse>>, (Status, Json<ApiError>)> {
+    let rl = check_ip_rate(&ip, limiter)?;
 
     let img = image::load_from_memory(&data).map_err(|e| {
-        (Status::BadRequest, Json(ApiError {
-            error: format!("Failed to load image: {}", e),
-            code: "INVALID_IMAGE".to_string(),
-            status: 400,
-        }))
+        (Status::BadRequest, Json(ApiError::new(400, "INVALID_IMAGE", format!("Failed to load image: {}", e))))
     })?;
 
     let gray = img.to_luma8();
     let decoded = rqrr_decode(&gray);
 
     match decoded {
-        Some(content) => Ok(Json(DecodeResponse {
-            data: content,
-            format: "qr".to_string(),
-        })),
+        Some(content) => Ok(RateLimited {
+            inner: Json(DecodeResponse {
+                data: content,
+                format: "qr".to_string(),
+            }),
+            rate_limit: rl,
+        }),
         None => Err((
             Status::UnprocessableEntity,
-            Json(ApiError {
-                error: "No QR code found in image".to_string(),
-                code: "NO_QR_FOUND".to_string(),
-                status: 422,
-            }),
+            Json(ApiError::new(422, "NO_QR_FOUND", "No QR code found in image")),
         )),
     }
 }
@@ -279,19 +266,15 @@ pub fn batch_generate(
     req: Json<BatchGenerateRequest>,
     ip: ClientIp,
     limiter: &State<RateLimiter>,
-) -> Result<Json<BatchQrResponse>, (Status, Json<ApiError>)> {
-    check_ip_rate(&ip, limiter)?;
+) -> Result<RateLimited<Json<BatchQrResponse>>, (Status, Json<ApiError>)> {
+    let rl = check_ip_rate(&ip, limiter)?;
     let req = req.into_inner();
 
     if req.items.is_empty() {
-        return Err((Status::BadRequest, Json(ApiError {
-            error: "Items array cannot be empty".to_string(), code: "EMPTY_BATCH".to_string(), status: 400,
-        })));
+        return Err((Status::BadRequest, Json(ApiError::new(400, "EMPTY_BATCH", "Items array cannot be empty"))));
     }
     if req.items.len() > 50 {
-        return Err((Status::BadRequest, Json(ApiError {
-            error: "Maximum 50 items per batch".to_string(), code: "BATCH_TOO_LARGE".to_string(), status: 400,
-        })));
+        return Err((Status::BadRequest, Json(ApiError::new(400, "BATCH_TOO_LARGE", "Maximum 50 items per batch"))));
     }
 
     let mut responses = Vec::new();
@@ -299,17 +282,43 @@ pub fn batch_generate(
         let fg_color = qr::parse_hex_color(&item.fg_color).unwrap_or([0, 0, 0, 255]);
         let bg_color = qr::parse_hex_color(&item.bg_color).unwrap_or([255, 255, 255, 255]);
 
+        // Decode logo if provided
+        let logo_data = item.logo.as_ref().and_then(|logo_str| {
+            let data = qr::decode_logo_base64(logo_str).ok()?;
+            if data.len() > 512 * 1024 {
+                return None; // Skip oversized logos silently in batch
+            }
+            Some(data)
+        });
+
+        // Force EC level H when logo is present for maximum redundancy
+        let ec_level = if logo_data.is_some() {
+            qrcode::EcLevel::H
+        } else {
+            qr::parse_ec_level(&item.error_correction)
+        };
+
         let options = qr::QrOptions {
             size: item.size.clamp(64, 4096),
             fg_color,
             bg_color,
-            error_correction: qr::parse_ec_level(&item.error_correction),
+            error_correction: ec_level,
             style: qr::QrStyle::parse(&item.style),
         };
 
         let (image_data, content_type) = match item.format.as_str() {
             "svg" => match qr::generate_svg(&item.data, &options) {
-                Ok(svg) => (svg.into_bytes(), "image/svg+xml"),
+                Ok(mut svg) => {
+                    // Apply logo overlay if provided
+                    if let Some(ref logo) = logo_data {
+                        if let Ok(overlay) = qr::svg_logo_overlay(logo, item.size.clamp(64, 4096), item.logo_size) {
+                            if let Some(pos) = svg.rfind("</svg>") {
+                                svg.insert_str(pos, &format!("{}\n", overlay));
+                            }
+                        }
+                    }
+                    (svg.into_bytes(), "image/svg+xml")
+                }
                 Err(_) => continue,
             },
             "pdf" => match qr::generate_pdf(&item.data, &options) {
@@ -317,7 +326,15 @@ pub fn batch_generate(
                 Err(_) => continue,
             },
             _ => match qr::generate_png(&item.data, &options) {
-                Ok(data) => (data, "image/png"),
+                Ok(mut data) => {
+                    // Apply logo overlay if provided
+                    if let Some(ref logo) = logo_data {
+                        if let Ok(overlaid) = qr::overlay_logo_png(&data, logo, item.logo_size) {
+                            data = overlaid;
+                        }
+                    }
+                    (data, "image/png")
+                }
                 Err(_) => continue,
             },
         };
@@ -335,7 +352,10 @@ pub fn batch_generate(
     }
 
     let total = responses.len();
-    Ok(Json(BatchQrResponse { items: responses, total }))
+    Ok(RateLimited {
+        inner: Json(BatchQrResponse { items: responses, total }),
+        rate_limit: rl,
+    })
 }
 
 #[post("/qr/template/<template_type>", format = "json", data = "<body>")]
@@ -344,14 +364,14 @@ pub fn generate_from_template(
     body: Json<serde_json::Value>,
     ip: ClientIp,
     limiter: &State<RateLimiter>,
-) -> Result<Json<QrResponse>, (Status, Json<ApiError>)> {
-    check_ip_rate(&ip, limiter)?;
+) -> Result<RateLimited<Json<QrResponse>>, (Status, Json<ApiError>)> {
+    let rl = check_ip_rate(&ip, limiter)?;
     let body = body.into_inner();
 
     let (data, format, size) = match template_type {
         "wifi" => {
             let ssid = body.get("ssid").and_then(|v| v.as_str()).ok_or_else(|| {
-                (Status::BadRequest, Json(ApiError { error: "Missing 'ssid' field".to_string(), code: "MISSING_FIELD".to_string(), status: 400 }))
+                (Status::BadRequest, Json(ApiError::new(400, "MISSING_FIELD", "Missing 'ssid' field")))
             })?;
             let password = body.get("password").and_then(|v| v.as_str()).unwrap_or("");
             let encryption = body.get("encryption").and_then(|v| v.as_str()).unwrap_or("WPA2");
@@ -362,7 +382,7 @@ pub fn generate_from_template(
         }
         "vcard" => {
             let name = body.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
-                (Status::BadRequest, Json(ApiError { error: "Missing 'name' field".to_string(), code: "MISSING_FIELD".to_string(), status: 400 }))
+                (Status::BadRequest, Json(ApiError::new(400, "MISSING_FIELD", "Missing 'name' field")))
             })?;
             let format = body.get("format").and_then(|v| v.as_str()).unwrap_or("png").to_string();
             let size = body.get("size").and_then(|v| v.as_u64()).unwrap_or(256) as u32;
@@ -378,7 +398,7 @@ pub fn generate_from_template(
         }
         "url" => {
             let mut url = body.get("url").and_then(|v| v.as_str()).ok_or_else(|| {
-                (Status::BadRequest, Json(ApiError { error: "Missing 'url' field".to_string(), code: "MISSING_FIELD".to_string(), status: 400 }))
+                (Status::BadRequest, Json(ApiError::new(400, "MISSING_FIELD", "Missing 'url' field")))
             })?.to_string();
 
             let mut params = Vec::new();
@@ -401,10 +421,7 @@ pub fn generate_from_template(
             (url, format, size)
         }
         _ => {
-            return Err((Status::BadRequest, Json(ApiError {
-                error: format!("Unknown template type: '{}'. Available: wifi, vcard, url", template_type),
-                code: "UNKNOWN_TEMPLATE".to_string(), status: 400,
-            })));
+            return Err((Status::BadRequest, Json(ApiError::new(400, "UNKNOWN_TEMPLATE", format!("Unknown template type: '{}'. Available: wifi, vcard, url", template_type)))));
         }
     };
 
@@ -420,19 +437,19 @@ pub fn generate_from_template(
     let (image_data, content_type) = match format.as_str() {
         "svg" => {
             let svg = qr::generate_svg(&data, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
             })?;
             (svg.into_bytes(), "image/svg+xml")
         }
         "pdf" => {
             let pdf = qr::generate_pdf(&data, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
             })?;
             (pdf, "application/pdf")
         }
         _ => {
             let png = qr::generate_png(&data, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
             })?;
             (png, "image/png")
         }
@@ -441,13 +458,16 @@ pub fn generate_from_template(
     let image_base64 = format!("data:{};base64,{}", content_type, BASE64.encode(&image_data));
     let share_url = build_share_url(&data, size, "#000000", "#FFFFFF", &format, style_str);
 
-    Ok(Json(QrResponse {
-        image_base64,
-        share_url,
-        format,
-        size,
-        data,
-    }))
+    Ok(RateLimited {
+        inner: Json(QrResponse {
+            image_base64,
+            share_url,
+            format,
+            size,
+            data,
+        }),
+        rate_limit: rl,
+    })
 }
 
 // ============ Share URL View (Stateless) ============
@@ -464,14 +484,10 @@ pub fn view_qr(
     style: Option<&str>,
 ) -> Result<(ContentType, Vec<u8>), (Status, Json<ApiError>)> {
     let decoded_data = BASE64.decode(data).map_err(|_| {
-        (Status::BadRequest, Json(ApiError {
-            error: "Invalid base64 data".to_string(), code: "INVALID_DATA".to_string(), status: 400,
-        }))
+        (Status::BadRequest, Json(ApiError::new(400, "INVALID_DATA", "Invalid base64 data")))
     })?;
     let content = String::from_utf8(decoded_data).map_err(|_| {
-        (Status::BadRequest, Json(ApiError {
-            error: "Invalid UTF-8 data".to_string(), code: "INVALID_DATA".to_string(), status: 400,
-        }))
+        (Status::BadRequest, Json(ApiError::new(400, "INVALID_DATA", "Invalid UTF-8 data")))
     })?;
 
     let size = size.unwrap_or(256).clamp(64, 4096);
@@ -494,19 +510,19 @@ pub fn view_qr(
     match fmt {
         "svg" => {
             let svg = qr::generate_svg(&content, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
             })?;
             Ok((ContentType::SVG, svg.into_bytes()))
         }
         "pdf" => {
             let pdf = qr::generate_pdf(&content, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
             })?;
             Ok((ContentType::PDF, pdf))
         }
         _ => {
             let png = qr::generate_png(&content, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
             })?;
             Ok((ContentType::PNG, png))
         }
@@ -524,42 +540,37 @@ pub fn create_tracked_qr(
     ip: ClientIp,
     limiter: &State<RateLimiter>,
     db: &State<DbPool>,
-) -> Result<Json<TrackedQrResponse>, (Status, Json<ApiError>)> {
+) -> Result<RateLimited<Json<TrackedQrResponse>>, (Status, Json<ApiError>)> {
     // IP-based rate limit for creation
     let key = format!("ip:tracked:{}", ip.0);
-    let result = limiter.check(&key, TRACKED_CREATE_RATE_LIMIT);
-    if !result.allowed {
+    let rl_tracked = limiter.check(&key, TRACKED_CREATE_RATE_LIMIT);
+    if !rl_tracked.allowed {
         return Err((Status::TooManyRequests, Json(ApiError {
             error: "Rate limit exceeded for tracked QR creation. Try again later.".to_string(),
-            code: "RATE_LIMIT_EXCEEDED".to_string(), status: 429,
+            code: "RATE_LIMIT_EXCEEDED".to_string(),
+            status: 429,
+            retry_after_secs: Some(rl_tracked.reset_secs),
+            limit: Some(rl_tracked.limit),
+            remaining: Some(rl_tracked.remaining),
         })));
     }
 
     let req = req.into_inner();
 
     if req.target_url.is_empty() {
-        return Err((Status::BadRequest, Json(ApiError {
-            error: "target_url cannot be empty".to_string(), code: "EMPTY_TARGET_URL".to_string(), status: 400,
-        })));
+        return Err((Status::BadRequest, Json(ApiError::new(400, "EMPTY_TARGET_URL", "target_url cannot be empty"))));
     }
     if !req.target_url.starts_with("http://") && !req.target_url.starts_with("https://") {
-        return Err((Status::BadRequest, Json(ApiError {
-            error: "target_url must start with http:// or https://".to_string(), code: "INVALID_URL".to_string(), status: 400,
-        })));
+        return Err((Status::BadRequest, Json(ApiError::new(400, "INVALID_URL", "target_url must start with http:// or https://"))));
     }
 
     let short_code = match req.short_code {
         Some(ref code) => {
             if code.len() < 3 || code.len() > 32 {
-                return Err((Status::BadRequest, Json(ApiError {
-                    error: "short_code must be 3-32 characters".to_string(), code: "INVALID_SHORT_CODE".to_string(), status: 400,
-                })));
+                return Err((Status::BadRequest, Json(ApiError::new(400, "INVALID_SHORT_CODE", "short_code must be 3-32 characters"))));
             }
             if !code.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
-                return Err((Status::BadRequest, Json(ApiError {
-                    error: "short_code must be alphanumeric, hyphens, or underscores".to_string(),
-                    code: "INVALID_SHORT_CODE".to_string(), status: 400,
-                })));
+                return Err((Status::BadRequest, Json(ApiError::new(400, "INVALID_SHORT_CODE", "short_code must be alphanumeric, hyphens, or underscores"))));
             }
             code.clone()
         }
@@ -575,10 +586,7 @@ pub fn create_tracked_qr(
             .query_row("SELECT COUNT(*) > 0 FROM tracked_qr WHERE short_code = ?1", rusqlite::params![short_code], |row| row.get(0))
             .unwrap_or(false);
         if exists {
-            return Err((Status::Conflict, Json(ApiError {
-                error: format!("Short code '{}' is already taken", short_code),
-                code: "SHORT_CODE_TAKEN".to_string(), status: 409,
-            })));
+            return Err((Status::Conflict, Json(ApiError::new(409, "SHORT_CODE_TAKEN", format!("Short code '{}' is already taken", short_code)))));
         }
     }
 
@@ -586,10 +594,10 @@ pub fn create_tracked_qr(
     let short_url = format!("{}/r/{}", base_url.trim_end_matches('/'), short_code);
 
     let fg_color = qr::parse_hex_color(&req.fg_color).map_err(|e| {
-        (Status::BadRequest, Json(ApiError { error: e, code: "INVALID_FG_COLOR".to_string(), status: 400 }))
+        (Status::BadRequest, Json(ApiError::new(400, "INVALID_FG_COLOR", e)))
     })?;
     let bg_color = qr::parse_hex_color(&req.bg_color).map_err(|e| {
-        (Status::BadRequest, Json(ApiError { error: e, code: "INVALID_BG_COLOR".to_string(), status: 400 }))
+        (Status::BadRequest, Json(ApiError::new(400, "INVALID_BG_COLOR", e)))
     })?;
 
     let options = qr::QrOptions {
@@ -603,19 +611,19 @@ pub fn create_tracked_qr(
     let (image_data, content_type) = match req.format.as_str() {
         "svg" => {
             let svg = qr::generate_svg(&short_url, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
             })?;
             (svg.into_bytes(), "image/svg+xml")
         }
         "pdf" => {
             let pdf = qr::generate_pdf(&short_url, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
             })?;
             (pdf, "application/pdf")
         }
         _ => {
             let png = qr::generate_png(&short_url, &options).map_err(|e| {
-                (Status::InternalServerError, Json(ApiError { error: e, code: "GENERATION_FAILED".to_string(), status: 500 }))
+                (Status::InternalServerError, Json(ApiError::new(500, "GENERATION_FAILED", e)))
             })?;
             (png, "image/png")
         }
@@ -634,14 +642,14 @@ pub fn create_tracked_qr(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         rusqlite::params![qr_id, short_url, req.format, req.size, req.fg_color, req.bg_color, req.error_correction, req.style, image_data],
     ).map_err(|e| {
-        (Status::InternalServerError, Json(ApiError { error: format!("Failed to store QR code: {}", e), code: "DB_ERROR".to_string(), status: 500 }))
+        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", format!("Failed to store QR code: {}", e))))
     })?;
 
     conn.execute(
         "INSERT INTO tracked_qr (id, qr_id, short_code, target_url, manage_token_hash, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![tracked_id, qr_id, short_code, req.target_url, manage_token_hash_val, req.expires_at],
     ).map_err(|e| {
-        (Status::InternalServerError, Json(ApiError { error: format!("Failed to create tracked QR: {}", e), code: "DB_ERROR".to_string(), status: 500 }))
+        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", format!("Failed to create tracked QR: {}", e))))
     })?;
 
     let created_at = conn
@@ -650,25 +658,28 @@ pub fn create_tracked_qr(
 
     let manage_url = format!("{}/api/v1/qr/tracked/{}?key={}", base_url.trim_end_matches('/'), tracked_id, manage_token);
 
-    Ok(Json(TrackedQrResponse {
-        id: tracked_id,
-        qr_id: qr_id.clone(),
-        short_code,
-        short_url: short_url.clone(),
-        target_url: req.target_url,
-        manage_token,
-        manage_url,
-        scan_count: 0,
-        expires_at: req.expires_at,
-        created_at,
-        qr: QrResponse {
-            image_base64,
-            share_url: short_url,
-            format: req.format,
-            size: req.size,
-            data: "tracked".to_string(),
-        },
-    }))
+    Ok(RateLimited {
+        inner: Json(TrackedQrResponse {
+            id: tracked_id,
+            qr_id: qr_id.clone(),
+            short_code,
+            short_url: short_url.clone(),
+            target_url: req.target_url,
+            manage_token,
+            manage_url,
+            scan_count: 0,
+            expires_at: req.expires_at,
+            created_at,
+            qr: QrResponse {
+                image_base64,
+                share_url: short_url,
+                format: req.format,
+                size: req.size,
+                data: "tracked".to_string(),
+            },
+        }),
+        rate_limit: rl_tracked,
+    })
 }
 
 #[get("/qr/tracked/<id>/stats")]
@@ -687,19 +698,19 @@ pub fn get_tracked_qr_stats(
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
                    row.get::<_, i64>(3)?, row.get::<_, Option<String>>(4)?, row.get::<_, String>(5)?)),
     ).map_err(|_| {
-        (Status::NotFound, Json(ApiError { error: "Tracked QR code not found or invalid token".to_string(), code: "NOT_FOUND".to_string(), status: 404 }))
+        (Status::NotFound, Json(ApiError::new(404, "NOT_FOUND", "Tracked QR code not found or invalid token")))
     })?;
 
     let mut stmt = conn.prepare(
         "SELECT id, scanned_at, user_agent, referrer FROM scan_events WHERE tracked_qr_id = ?1 ORDER BY scanned_at DESC LIMIT 100",
     ).map_err(|e| {
-        (Status::InternalServerError, Json(ApiError { error: format!("Database error: {}", e), code: "DB_ERROR".to_string(), status: 500 }))
+        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", format!("Database error: {}", e))))
     })?;
 
     let recent_scans = stmt.query_map(rusqlite::params![id], |row| {
         Ok(ScanEventResponse { id: row.get(0)?, scanned_at: row.get(1)?, user_agent: row.get(2)?, referrer: row.get(3)? })
     }).map_err(|e| {
-        (Status::InternalServerError, Json(ApiError { error: format!("Query error: {}", e), code: "DB_ERROR".to_string(), status: 500 }))
+        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", format!("Query error: {}", e))))
     })?.filter_map(|r| r.ok()).collect();
 
     Ok(Json(TrackedQrStatsResponse {
@@ -721,7 +732,7 @@ pub fn delete_tracked_qr(
         "SELECT qr_id FROM tracked_qr WHERE id = ?1 AND manage_token_hash = ?2",
         rusqlite::params![id, token_hash], |row| row.get(0),
     ).map_err(|_| {
-        (Status::NotFound, Json(ApiError { error: "Tracked QR code not found or invalid token".to_string(), code: "NOT_FOUND".to_string(), status: 404 }))
+        (Status::NotFound, Json(ApiError::new(404, "NOT_FOUND", "Tracked QR code not found or invalid token")))
     })?;
 
     conn.execute("DELETE FROM scan_events WHERE tracked_qr_id = ?1", rusqlite::params![id]).unwrap_or(0);
@@ -768,9 +779,7 @@ pub fn redirect_short_url(
             if let Some(ref exp) = expires_at {
                 let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
                 if now > *exp {
-                    return Err((Status::Gone, Json(ApiError {
-                        error: "This short URL has expired".to_string(), code: "EXPIRED".to_string(), status: 410,
-                    })));
+                    return Err((Status::Gone, Json(ApiError::new(410, "EXPIRED", "This short URL has expired"))));
                 }
             }
 
@@ -783,9 +792,7 @@ pub fn redirect_short_url(
 
             Ok(Redirect::temporary(target_url))
         }
-        Err(_) => Err((Status::NotFound, Json(ApiError {
-            error: "Short URL not found".to_string(), code: "NOT_FOUND".to_string(), status: 404,
-        }))),
+        Err(_) => Err((Status::NotFound, Json(ApiError::new(404, "NOT_FOUND", "Short URL not found")))),
     }
 }
 

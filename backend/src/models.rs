@@ -121,6 +121,29 @@ pub struct ApiError {
     pub error: String,
     pub code: String,
     pub status: u16,
+    /// Seconds until rate limit resets (only present on 429 responses).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_secs: Option<u64>,
+    /// Configured rate limit (only present on 429 responses).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+    /// Requests remaining in current window (only present on 429 responses).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining: Option<u64>,
+}
+
+impl ApiError {
+    /// Create a standard API error without rate limit fields.
+    pub fn new(status: u16, code: impl Into<String>, error: impl Into<String>) -> Self {
+        Self {
+            error: error.into(),
+            code: code.into(),
+            status,
+            retry_after_secs: None,
+            limit: None,
+            remaining: None,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
