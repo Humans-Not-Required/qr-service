@@ -855,6 +855,50 @@
           }
         }
       }
+    },
+    "/.well-known/skills/index.json": {
+      "get": {
+        "summary": "Skills discovery index (Cloudflare RFC)",
+        "description": "Lists available integration skills for progressive loading by compatible AI agents.",
+        "operationId": "getSkillsIndex",
+        "tags": [
+          "Discovery"
+        ],
+        "responses": {
+          "200": {
+            "description": "Skills index",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/skills/qr-service/SKILL.md": {
+      "get": {
+        "summary": "Integration skill document (agentskills.io format)",
+        "description": "SKILL.md with YAML frontmatter.",
+        "operationId": "getSkillMd",
+        "tags": [
+          "Discovery"
+        ],
+        "responses": {
+          "200": {
+            "description": "SKILL.md document",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
