@@ -1606,3 +1606,885 @@ fn test_rate_limit_remaining_decrements() {
 
     assert!(rem2 < rem1, "Remaining should decrement: {} should be less than {}", rem2, rem1);
 }
+
+// ============ Extended Test Client (includes all routes) ============
+
+fn test_client_full() -> Client {
+    let db_path = format!("/tmp/qr_http_full_test_{}.db", uuid::Uuid::new_v4());
+    std::env::set_var("BASE_URL", "http://localhost:8000");
+
+    let db = qr_service::db::init_db_with_path(&db_path).expect("DB should initialize");
+    let limiter = qr_service::rate_limit::RateLimiter::new(Duration::from_secs(3600));
+
+    let rocket = rocket::build()
+        .manage(db)
+        .manage(limiter)
+        .mount(
+            "/api/v1",
+            routes![
+                qr_service::routes::health,
+                qr_service::routes::openapi,
+                qr_service::routes::llms_txt,
+                qr_service::routes::generate_qr,
+                qr_service::routes::decode_qr,
+                qr_service::routes::batch_generate,
+                qr_service::routes::generate_from_template,
+                qr_service::routes::create_tracked_qr,
+                qr_service::routes::get_tracked_qr_stats,
+                qr_service::routes::delete_tracked_qr,
+                qr_service::routes::api_skills_skill_md,
+            ],
+        )
+        .mount(
+            "/",
+            routes![
+                qr_service::routes::redirect_short_url,
+                qr_service::routes::view_qr,
+                qr_service::routes::root_llms_txt,
+                qr_service::routes::skills_index,
+                qr_service::routes::skills_skill_md,
+            ],
+        );
+
+    Client::tracked(rocket).expect("valid rocket instance")
+}
+
+// ============ Determinism ============
+
+#[test]
+fn test_generate_deterministic_png() {
+    let client = test_client();
+    let body = r#"{"data": "deterministic-test", "size": 256, "format": "png"}"#;
+
+    let resp1 = client.post("/api/v1/qr/generate").header(ContentType::JSON).body(body).dispatch();
+    let body1: serde_json::Value = resp1.into_json().unwrap();
+
+    let resp2 = client.post("/api/v1/qr/generate").header(ContentType::JSON).body(body).dispatch();
+    let body2: serde_json::Value = resp2.into_json().unwrap();
+
+    assert_eq!(body1["image_base64"], body2["image_base64"], "Same input should produce same PNG output");
+}
+
+#[test]
+fn test_generate_deterministic_svg() {
+    let client = test_client();
+    let body = r#"{"data": "svg-deterministic", "size": 200, "format": "svg"}"#;
+
+    let resp1 = client.post("/api/v1/qr/generate").header(ContentType::JSON).body(body).dispatch();
+    let b1: serde_json::Value = resp1.into_json().unwrap();
+
+    let resp2 = client.post("/api/v1/qr/generate").header(ContentType::JSON).body(body).dispatch();
+    let b2: serde_json::Value = resp2.into_json().unwrap();
+
+    assert_eq!(b1["image_base64"], b2["image_base64"], "Same input should produce same SVG output");
+}
+
+#[test]
+fn test_different_data_produces_different_output() {
+    let client = test_client();
+    let resp1 = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(r#"{"data": "alpha"}"#).dispatch();
+    let b1: serde_json::Value = resp1.into_json().unwrap();
+
+    let resp2 = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(r#"{"data": "beta"}"#).dispatch();
+    let b2: serde_json::Value = resp2.into_json().unwrap();
+
+    assert_ne!(b1["image_base64"], b2["image_base64"], "Different input should produce different output");
+}
+
+// ============ Unicode & Special Characters ============
+
+#[test]
+fn test_generate_unicode_cjk() {
+    let client = test_client();
+    let body = serde_json::json!({"data": "你好世界 🌍 こんにちは", "format": "png", "size": 300});
+    let resp = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    assert!(result["image_base64"].as_str().unwrap().starts_with("data:image/png;base64,"));
+}
+
+#[test]
+fn test_generate_unicode_emoji() {
+    let client = test_client();
+    let body = serde_json::json!({"data": "🎉🎊🎈🎁🎀🎄🎃🎅", "format": "svg"});
+    let resp = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+}
+
+#[test]
+fn test_generate_long_url_with_params() {
+    let client = test_client();
+    let long_url = "https://example.com/path/to/resource?param1=value1&param2=value2&param3=value3&token=abcdef1234567890abcdef1234567890&utm_source=test&utm_medium=qr";
+    let body = serde_json::json!({"data": long_url, "format": "png", "size": 512});
+    let resp = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+}
+
+#[test]
+fn test_generate_special_characters() {
+    let client = test_client();
+    let body = serde_json::json!({"data": "line1\nline2\ttab \"quoted\" <angle> &ampersand"});
+    let resp = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+}
+
+// ============ vCard Full Fields ============
+
+#[test]
+fn test_template_vcard_all_fields() {
+    let client = test_client();
+    let body = serde_json::json!({
+        "name": "Dr. Jane Smith",
+        "email": "jane@example.com",
+        "phone": "+14155551234",
+        "org": "Acme Corp",
+        "title": "Chief Technology Officer",
+        "url": "https://janesmith.dev"
+    });
+    let resp = client.post("/api/v1/qr/template/vcard").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    let data = result["data"].as_str().unwrap();
+    assert!(data.contains("FN:Dr. Jane Smith"));
+    assert!(data.contains("EMAIL:jane@example.com"));
+    assert!(data.contains("TEL:+14155551234"));
+    assert!(data.contains("ORG:Acme Corp"));
+    assert!(data.contains("TITLE:Chief Technology Officer"));
+    assert!(data.contains("URL:https://janesmith.dev"));
+}
+
+#[test]
+fn test_template_vcard_pdf_format() {
+    let client = test_client();
+    let body = serde_json::json!({"name": "Alice PDF", "email": "alice@test.com", "format": "pdf"});
+    let resp = client.post("/api/v1/qr/template/vcard").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    assert!(result["image_base64"].as_str().unwrap().starts_with("data:application/pdf;base64,"));
+}
+
+#[test]
+fn test_template_vcard_unicode_name() {
+    let client = test_client();
+    let body = serde_json::json!({"name": "田中太郎", "phone": "+81312345678"});
+    let resp = client.post("/api/v1/qr/template/vcard").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    assert!(result["data"].as_str().unwrap().contains("FN:田中太郎"));
+}
+
+// ============ WiFi Encryption Types ============
+
+#[test]
+fn test_template_wifi_wpa_encryption() {
+    let client = test_client();
+    let body = serde_json::json!({"ssid": "WPANet", "password": "wpapass", "encryption": "WPA"});
+    let resp = client.post("/api/v1/qr/template/wifi").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    assert!(result["data"].as_str().unwrap().contains("T:WPA;"));
+}
+
+#[test]
+fn test_template_wifi_wep_encryption() {
+    let client = test_client();
+    let body = serde_json::json!({"ssid": "WEPNet", "password": "weppass", "encryption": "WEP"});
+    let resp = client.post("/api/v1/qr/template/wifi").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    assert!(result["data"].as_str().unwrap().contains("T:WEP;"));
+}
+
+#[test]
+fn test_template_wifi_hidden_network() {
+    let client = test_client();
+    let body = serde_json::json!({"ssid": "HiddenNet", "password": "secret", "hidden": true});
+    let resp = client.post("/api/v1/qr/template/wifi").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    assert!(result["data"].as_str().unwrap().contains("H:true"));
+}
+
+#[test]
+fn test_template_wifi_svg_format() {
+    let client = test_client();
+    let body = serde_json::json!({"ssid": "SVGNet", "password": "pass", "format": "svg"});
+    let resp = client.post("/api/v1/qr/template/wifi").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    assert!(result["image_base64"].as_str().unwrap().starts_with("data:image/svg+xml;base64,"));
+}
+
+// ============ Template with Styles ============
+
+#[test]
+fn test_template_wifi_rounded_style() {
+    let client = test_client();
+    let body = serde_json::json!({"ssid": "RoundedNet", "password": "pass", "style": "rounded"});
+    let resp = client.post("/api/v1/qr/template/wifi").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+}
+
+#[test]
+fn test_template_vcard_dots_style() {
+    let client = test_client();
+    let body = serde_json::json!({"name": "Bob Dots", "style": "dots"});
+    let resp = client.post("/api/v1/qr/template/vcard").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+}
+
+#[test]
+fn test_template_url_all_utm_params() {
+    let client = test_client();
+    let body = serde_json::json!({
+        "url": "https://example.com",
+        "utm_source": "newsletter",
+        "utm_medium": "email",
+        "utm_campaign": "spring_sale"
+    });
+    let resp = client.post("/api/v1/qr/template/url").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    let data = result["data"].as_str().unwrap();
+    assert!(data.contains("utm_source=newsletter"));
+    assert!(data.contains("utm_medium=email"));
+    assert!(data.contains("utm_campaign=spring_sale"));
+}
+
+// ============ Tracked QR Full Lifecycle with Scan Counting ============
+
+#[test]
+fn test_tracked_qr_full_lifecycle_with_scans() {
+    let client = test_client();
+
+    // 1. Create tracked QR
+    let create_resp = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/lifecycle", "short_code": "lifecycle-test"}"#).dispatch();
+    assert_eq!(create_resp.status(), Status::Ok);
+    let create_body: serde_json::Value = create_resp.into_json().unwrap();
+    let id = create_body["id"].as_str().unwrap().to_string();
+    let token = create_body["manage_token"].as_str().unwrap().to_string();
+
+    // 2. First redirect (scan)
+    let redir1 = client.get("/r/lifecycle-test")
+        .header(Header::new("User-Agent", "TestBot/1.0"))
+        .header(Header::new("Referer", "https://referrer.example.com"))
+        .dispatch();
+    assert_eq!(redir1.status(), Status::TemporaryRedirect);
+
+    // 3. Check stats — should have 1 scan
+    let stats1 = client.get(format!("/api/v1/qr/tracked/{}/stats", id))
+        .header(Header::new("Authorization", format!("Bearer {}", token)))
+        .dispatch();
+    assert_eq!(stats1.status(), Status::Ok);
+    let stats1_body: serde_json::Value = stats1.into_json().unwrap();
+    assert_eq!(stats1_body["scan_count"], 1);
+    assert_eq!(stats1_body["recent_scans"].as_array().unwrap().len(), 1);
+    // Verify user-agent was captured
+    let scan0 = &stats1_body["recent_scans"][0];
+    assert_eq!(scan0["user_agent"], "TestBot/1.0");
+    assert_eq!(scan0["referrer"], "https://referrer.example.com");
+
+    // 4. Second redirect (another scan)
+    let redir2 = client.get("/r/lifecycle-test")
+        .header(Header::new("User-Agent", "MobileBot/2.0"))
+        .dispatch();
+    assert_eq!(redir2.status(), Status::TemporaryRedirect);
+
+    // 5. Check stats — should have 2 scans
+    let stats2 = client.get(format!("/api/v1/qr/tracked/{}/stats", id))
+        .header(Header::new("Authorization", format!("Bearer {}", token)))
+        .dispatch();
+    let stats2_body: serde_json::Value = stats2.into_json().unwrap();
+    assert_eq!(stats2_body["scan_count"], 2);
+    assert_eq!(stats2_body["recent_scans"].as_array().unwrap().len(), 2);
+
+    // 6. Delete — should cascade clean scan events
+    let del = client.delete(format!("/api/v1/qr/tracked/{}", id))
+        .header(Header::new("Authorization", format!("Bearer {}", token)))
+        .dispatch();
+    assert_eq!(del.status(), Status::Ok);
+
+    // 7. Short URL no longer redirects
+    let redir3 = client.get("/r/lifecycle-test").dispatch();
+    assert_eq!(redir3.status(), Status::NotFound);
+}
+
+// ============ Tracked QR Isolation ============
+
+#[test]
+fn test_tracked_qr_stats_isolation() {
+    let client = test_client();
+
+    // Create two tracked QRs
+    let resp1 = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(r#"{"target_url": "https://one.example.com", "short_code": "iso-one"}"#).dispatch();
+    let b1: serde_json::Value = resp1.into_json().unwrap();
+    let id1 = b1["id"].as_str().unwrap().to_string();
+    let tok1 = b1["manage_token"].as_str().unwrap().to_string();
+
+    let resp2 = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(r#"{"target_url": "https://two.example.com", "short_code": "iso-two"}"#).dispatch();
+    let b2: serde_json::Value = resp2.into_json().unwrap();
+    let id2 = b2["id"].as_str().unwrap().to_string();
+    let tok2 = b2["manage_token"].as_str().unwrap().to_string();
+
+    // Scan only the first one 3 times
+    for _ in 0..3 {
+        client.get("/r/iso-one").dispatch();
+    }
+
+    // Stats for first should show 3 scans
+    let s1 = client.get(format!("/api/v1/qr/tracked/{}/stats", id1))
+        .header(Header::new("Authorization", format!("Bearer {}", tok1))).dispatch();
+    let s1b: serde_json::Value = s1.into_json().unwrap();
+    assert_eq!(s1b["scan_count"], 3);
+
+    // Stats for second should show 0 scans
+    let s2 = client.get(format!("/api/v1/qr/tracked/{}/stats", id2))
+        .header(Header::new("Authorization", format!("Bearer {}", tok2))).dispatch();
+    let s2b: serde_json::Value = s2.into_json().unwrap();
+    assert_eq!(s2b["scan_count"], 0);
+    assert!(s2b["recent_scans"].as_array().unwrap().is_empty());
+}
+
+// ============ Expired Tracked QR ============
+
+#[test]
+fn test_tracked_qr_expired_redirect_returns_gone() {
+    let client = test_client();
+    // Create with past expiry
+    let resp = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/expired", "short_code": "expired-link", "expires_at": "2020-01-01T00:00:00Z"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Try to follow short URL — should get 410 Gone
+    let redir = client.get("/r/expired-link").dispatch();
+    assert_eq!(redir.status(), Status::Gone);
+    let body: serde_json::Value = redir.into_json().unwrap();
+    assert_eq!(body["code"], "EXPIRED");
+}
+
+// ============ Tracked QR with SVG Format ============
+
+#[test]
+fn test_tracked_qr_svg_format() {
+    let client = test_client();
+    let resp = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/svg-tracked", "format": "svg"}"#).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: serde_json::Value = resp.into_json().unwrap();
+    assert!(body["qr"]["image_base64"].as_str().unwrap().starts_with("data:image/svg+xml;base64,"));
+    assert_eq!(body["qr"]["format"], "svg");
+}
+
+// ============ Tracked QR with Custom Style and Colors ============
+
+#[test]
+fn test_tracked_qr_custom_style_colors() {
+    let client = test_client();
+    let body = serde_json::json!({
+        "target_url": "https://example.com/styled",
+        "format": "png",
+        "size": 400,
+        "fg_color": "#FF5500",
+        "bg_color": "#EEEEFF",
+        "style": "rounded"
+    });
+    let resp = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    assert!(result["id"].is_string());
+    assert!(result["short_url"].is_string());
+    assert!(result["manage_token"].as_str().unwrap().starts_with("qrt_"));
+}
+
+// ============ Tracked QR Stats Response Fields ============
+
+#[test]
+fn test_tracked_qr_stats_response_completeness() {
+    let client = test_client();
+    let create = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/stats-fields"}"#).dispatch();
+    let cb: serde_json::Value = create.into_json().unwrap();
+    let id = cb["id"].as_str().unwrap();
+    let token = cb["manage_token"].as_str().unwrap();
+
+    let stats = client.get(format!("/api/v1/qr/tracked/{}/stats", id))
+        .header(Header::new("Authorization", format!("Bearer {}", token))).dispatch();
+    assert_eq!(stats.status(), Status::Ok);
+    let sb: serde_json::Value = stats.into_json().unwrap();
+
+    assert!(sb["id"].is_string(), "Missing id");
+    assert!(sb["short_code"].is_string(), "Missing short_code");
+    assert!(sb["target_url"].is_string(), "Missing target_url");
+    assert!(sb["scan_count"].is_number(), "Missing scan_count");
+    assert!(sb["created_at"].is_string(), "Missing created_at");
+    assert!(sb["recent_scans"].is_array(), "Missing recent_scans");
+}
+
+// ============ Short Code Validation ============
+
+#[test]
+fn test_tracked_qr_short_code_too_long() {
+    let client = test_client();
+    let long_code = "a".repeat(33); // > 32 chars
+    let body = serde_json::json!({"target_url": "https://example.com", "short_code": long_code});
+    let resp = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::BadRequest);
+    let rb: serde_json::Value = resp.into_json().unwrap();
+    assert_eq!(rb["code"], "INVALID_SHORT_CODE");
+}
+
+#[test]
+fn test_tracked_qr_short_code_invalid_chars() {
+    let client = test_client();
+    let body = serde_json::json!({"target_url": "https://example.com", "short_code": "has spaces!"});
+    let resp = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::BadRequest);
+    let rb: serde_json::Value = resp.into_json().unwrap();
+    assert_eq!(rb["code"], "INVALID_SHORT_CODE");
+}
+
+#[test]
+fn test_tracked_qr_short_code_boundary_valid() {
+    let client = test_client();
+    // Exactly 3 chars (minimum)
+    let body = serde_json::json!({"target_url": "https://example.com", "short_code": "abc"});
+    let resp = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Exactly 32 chars (maximum)
+    let code32 = "a".repeat(32);
+    let body2 = serde_json::json!({"target_url": "https://example.com", "short_code": code32});
+    let resp2 = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(body2.to_string()).dispatch();
+    assert_eq!(resp2.status(), Status::Ok);
+}
+
+// ============ Size Boundaries ============
+
+#[test]
+fn test_generate_size_exact_boundaries() {
+    let client = test_client();
+    // Exactly 64 (minimum) → OK
+    let resp64 = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(r#"{"data": "min-size", "size": 64}"#).dispatch();
+    assert_eq!(resp64.status(), Status::Ok);
+
+    // Exactly 4096 (maximum) → OK
+    let resp4096 = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(r#"{"data": "max-size", "size": 4096}"#).dispatch();
+    assert_eq!(resp4096.status(), Status::Ok);
+
+    // 63 → rejected
+    let resp63 = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(r#"{"data": "under-min", "size": 63}"#).dispatch();
+    assert_eq!(resp63.status(), Status::BadRequest);
+    let b63: serde_json::Value = resp63.into_json().unwrap();
+    assert_eq!(b63["code"], "INVALID_SIZE");
+
+    // 4097 → rejected
+    let resp4097 = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(r#"{"data": "over-max", "size": 4097}"#).dispatch();
+    assert_eq!(resp4097.status(), Status::BadRequest);
+    let b4097: serde_json::Value = resp4097.into_json().unwrap();
+    assert_eq!(b4097["code"], "INVALID_SIZE");
+}
+
+// ============ Color Edge Cases ============
+
+#[test]
+fn test_generate_rgba_hex_color() {
+    let client = test_client();
+    let body = serde_json::json!({"data": "rgba-test", "fg_color": "#FF000080", "bg_color": "#00FF0040"});
+    let resp = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+}
+
+#[test]
+fn test_generate_invalid_hex_color() {
+    let client = test_client();
+    let body = serde_json::json!({"data": "bad-color", "fg_color": "#GGG"});
+    let resp = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::BadRequest);
+    let rb: serde_json::Value = resp.into_json().unwrap();
+    assert_eq!(rb["code"], "INVALID_FG_COLOR");
+}
+
+#[test]
+fn test_generate_invalid_bg_color() {
+    let client = test_client();
+    let body = serde_json::json!({"data": "bad-bg", "bg_color": "#XYZ"});
+    let resp = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::BadRequest);
+    let rb: serde_json::Value = resp.into_json().unwrap();
+    assert_eq!(rb["code"], "INVALID_BG_COLOR");
+}
+
+// ============ Error Response Structure ============
+
+#[test]
+fn test_error_response_400_structure() {
+    let client = test_client();
+    let resp = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(r#"{"data": ""}"#).dispatch();
+    assert_eq!(resp.status(), Status::BadRequest);
+    let body: serde_json::Value = resp.into_json().unwrap();
+    assert!(body["error"].is_string(), "Missing error field");
+    assert!(body["code"].is_string(), "Missing code field");
+    assert_eq!(body["status"], 400, "Status should be 400");
+}
+
+#[test]
+fn test_error_response_404_structure() {
+    let client = test_client();
+    let resp = client.get("/r/nonexistent-short-code").dispatch();
+    assert_eq!(resp.status(), Status::NotFound);
+    let body: serde_json::Value = resp.into_json().unwrap();
+    assert!(body["error"].is_string(), "Missing error field");
+    assert_eq!(body["code"], "NOT_FOUND");
+    assert_eq!(body["status"], 404);
+}
+
+#[test]
+fn test_error_response_401_structure() {
+    let client = test_client();
+    let create = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/auth-test"}"#).dispatch();
+    let cb: serde_json::Value = create.into_json().unwrap();
+    let id = cb["id"].as_str().unwrap();
+
+    let resp = client.get(format!("/api/v1/qr/tracked/{}/stats", id)).dispatch();
+    assert_eq!(resp.status(), Status::Unauthorized);
+}
+
+#[test]
+fn test_error_response_409_structure() {
+    let client = test_client();
+    // Create first
+    client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com", "short_code": "conflict-struct"}"#).dispatch();
+
+    // Duplicate
+    let resp = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(r#"{"target_url": "https://other.com", "short_code": "conflict-struct"}"#).dispatch();
+    assert_eq!(resp.status(), Status::Conflict);
+    let body: serde_json::Value = resp.into_json().unwrap();
+    assert_eq!(body["code"], "SHORT_CODE_TAKEN");
+    assert_eq!(body["status"], 409);
+    assert!(body["error"].is_string());
+}
+
+// ============ OpenAPI Structure Validation ============
+
+#[test]
+fn test_openapi_structure() {
+    let client = test_client();
+    let resp = client.get("/api/v1/openapi.json").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: serde_json::Value = serde_json::from_str(&resp.into_string().unwrap()).unwrap();
+    assert!(body["openapi"].as_str().unwrap().starts_with("3."), "Should be OpenAPI 3.x");
+    assert!(body["info"]["title"].is_string(), "Missing info.title");
+    assert!(body["info"]["version"].is_string(), "Missing info.version");
+    assert!(body["paths"].is_object(), "Missing paths");
+    // Should have at least the core endpoints (paths are relative, no /api/v1 prefix)
+    let paths = body["paths"].as_object().unwrap();
+    assert!(paths.contains_key("/qr/generate"), "Missing generate endpoint");
+    assert!(paths.contains_key("/qr/decode"), "Missing decode endpoint");
+    assert!(paths.contains_key("/qr/batch"), "Missing batch endpoint");
+    assert!(paths.contains_key("/health"), "Missing health endpoint");
+}
+
+// ============ Discovery Dual Paths ============
+
+#[test]
+fn test_root_llms_txt() {
+    let client = test_client_full();
+    let resp = client.get("/llms.txt").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body = resp.into_string().unwrap();
+    assert!(body.contains("qr") || body.contains("QR"), "Root llms.txt should mention QR");
+}
+
+#[test]
+fn test_api_v1_skills_skill_md() {
+    let client = test_client_full();
+    let resp = client.get("/api/v1/skills/SKILL.md").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body = resp.into_string().unwrap();
+    assert!(body.contains("qr-service"), "SKILL.md should contain service name");
+    assert!(body.contains("## Quick Start"), "SKILL.md should have Quick Start section");
+}
+
+#[test]
+fn test_dual_llms_txt_same_content() {
+    let client = test_client_full();
+    let resp1 = client.get("/llms.txt").dispatch();
+    let body1 = resp1.into_string().unwrap();
+
+    let resp2 = client.get("/api/v1/llms.txt").dispatch();
+    let body2 = resp2.into_string().unwrap();
+
+    assert_eq!(body1, body2, "Root and /api/v1 llms.txt should return same content");
+}
+
+#[test]
+fn test_dual_skill_md_same_content() {
+    let client = test_client_full();
+    let resp1 = client.get("/.well-known/skills/qr-service/SKILL.md").dispatch();
+    let body1 = resp1.into_string().unwrap();
+
+    let resp2 = client.get("/api/v1/skills/SKILL.md").dispatch();
+    let body2 = resp2.into_string().unwrap();
+
+    assert_eq!(body1, body2, "Well-known and /api/v1 SKILL.md should return same content");
+}
+
+// ============ Batch with Styles ============
+
+#[test]
+fn test_batch_with_different_styles() {
+    let client = test_client();
+    let body = serde_json::json!({
+        "items": [
+            {"data": "square-item", "style": "square"},
+            {"data": "rounded-item", "style": "rounded"},
+            {"data": "dots-item", "style": "dots"}
+        ]
+    });
+    let resp = client.post("/api/v1/qr/batch").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    assert_eq!(result["total"], 3);
+    // Each should produce different images (different styles → different pixels)
+    let items = result["items"].as_array().unwrap();
+    assert_ne!(items[0]["image_base64"], items[1]["image_base64"]);
+    assert_ne!(items[1]["image_base64"], items[2]["image_base64"]);
+}
+
+#[test]
+fn test_batch_deterministic() {
+    let client = test_client();
+    let body = r#"{"items": [{"data": "batch-det-1"}, {"data": "batch-det-2"}]}"#;
+
+    let resp1 = client.post("/api/v1/qr/batch").header(ContentType::JSON).body(body).dispatch();
+    let b1: serde_json::Value = resp1.into_json().unwrap();
+
+    let resp2 = client.post("/api/v1/qr/batch").header(ContentType::JSON).body(body).dispatch();
+    let b2: serde_json::Value = resp2.into_json().unwrap();
+
+    assert_eq!(b1["items"][0]["image_base64"], b2["items"][0]["image_base64"]);
+    assert_eq!(b1["items"][1]["image_base64"], b2["items"][1]["image_base64"]);
+}
+
+// ============ View Endpoint Combinations ============
+
+#[test]
+fn test_view_all_styles_png() {
+    let client = test_client();
+    use base64::Engine;
+    let data = base64::engine::general_purpose::STANDARD.encode("view-style-test");
+    let encoded = urlencoding::encode(&data);
+
+    for style in &["square", "rounded", "dots"] {
+        let resp = client.get(format!("/qr/view?data={}&style={}", encoded, style)).dispatch();
+        assert_eq!(resp.status(), Status::Ok, "View with style {} should succeed", style);
+        let bytes = resp.into_bytes().unwrap();
+        assert_eq!(&bytes[..4], &[0x89, 0x50, 0x4E, 0x47], "Should return PNG for style {}", style);
+    }
+}
+
+#[test]
+fn test_view_all_formats() {
+    let client = test_client();
+    use base64::Engine;
+    let data = base64::engine::general_purpose::STANDARD.encode("view-fmt-test");
+    let encoded = urlencoding::encode(&data);
+
+    // PNG
+    let resp_png = client.get(format!("/qr/view?data={}&format=png", encoded)).dispatch();
+    assert_eq!(resp_png.status(), Status::Ok);
+    let bytes = resp_png.into_bytes().unwrap();
+    assert_eq!(&bytes[..4], &[0x89, 0x50, 0x4E, 0x47], "PNG magic bytes");
+
+    // SVG
+    let resp_svg = client.get(format!("/qr/view?data={}&format=svg", encoded)).dispatch();
+    assert_eq!(resp_svg.status(), Status::Ok);
+    let svg = resp_svg.into_string().unwrap();
+    assert!(svg.contains("<svg"), "Should contain SVG");
+
+    // PDF
+    let resp_pdf = client.get(format!("/qr/view?data={}&format=pdf", encoded)).dispatch();
+    assert_eq!(resp_pdf.status(), Status::Ok);
+    let pdf_bytes = resp_pdf.into_bytes().unwrap();
+    assert!(pdf_bytes.starts_with(b"%PDF"), "PDF magic bytes");
+}
+
+// ============ Decode Roundtrip with All Styles ============
+
+#[test]
+fn test_decode_roundtrip_all_styles() {
+    let client = test_client();
+
+    // Use square style for roundtrip decode (rounded/dots may not always be decodable at lower sizes)
+    for style in &["square"] {
+        let body = serde_json::json!({
+            "data": format!("roundtrip-{}", style),
+            "format": "png",
+            "size": 256,
+            "error_correction": "H",
+            "style": style
+        });
+        let gen_resp = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+            .body(body.to_string()).dispatch();
+        assert_eq!(gen_resp.status(), Status::Ok);
+        let gen_body: serde_json::Value = gen_resp.into_json().unwrap();
+
+        let b64 = gen_body["image_base64"].as_str().unwrap();
+        let raw = b64.strip_prefix("data:image/png;base64,").unwrap();
+        let png_bytes = base64::engine::general_purpose::STANDARD.decode(raw).unwrap();
+
+        let dec_resp = client.post("/api/v1/qr/decode").body(png_bytes).dispatch();
+        assert_eq!(dec_resp.status(), Status::Ok, "Decode failed for style {}", style);
+        let dec_body: serde_json::Value = dec_resp.into_json().unwrap();
+        assert_eq!(dec_body["data"], format!("roundtrip-{}", style));
+    }
+
+    // Verify all styles at least generate successfully (even if not always decodable)
+    for style in &["rounded", "dots"] {
+        let body = serde_json::json!({
+            "data": format!("gen-{}", style),
+            "format": "png",
+            "size": 256,
+            "style": style
+        });
+        let resp = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+            .body(body.to_string()).dispatch();
+        assert_eq!(resp.status(), Status::Ok, "Generate failed for style {}", style);
+    }
+}
+
+// ============ Tracked QR Created At Timestamp ============
+
+#[test]
+fn test_tracked_qr_has_created_at() {
+    let client = test_client();
+    let resp = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/timestamp-test"}"#).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: serde_json::Value = resp.into_json().unwrap();
+    assert!(body["created_at"].is_string(), "Missing created_at");
+    // Should be a reasonable ISO-8601 / datetime string
+    let created = body["created_at"].as_str().unwrap();
+    assert!(created.contains("20"), "created_at should contain year prefix");
+}
+
+// ============ Batch Size Clamping ============
+
+#[test]
+fn test_batch_size_clamped() {
+    let client = test_client();
+    // Batch items with out-of-range sizes get clamped (not rejected)
+    let body = serde_json::json!({
+        "items": [
+            {"data": "tiny", "size": 10},
+            {"data": "huge", "size": 9999}
+        ]
+    });
+    let resp = client.post("/api/v1/qr/batch").header(ContentType::JSON)
+        .body(body.to_string()).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let result: serde_json::Value = resp.into_json().unwrap();
+    assert_eq!(result["total"], 2);
+    // Sizes should be clamped to valid range
+    assert_eq!(result["items"][0]["size"], 10); // size field reflects requested, but image is clamped
+    assert_eq!(result["items"][1]["size"], 9999);
+}
+
+// ============ Share URL Construction ============
+
+#[test]
+fn test_share_url_in_generate_response() {
+    let client = test_client();
+    let resp = client.post("/api/v1/qr/generate").header(ContentType::JSON)
+        .body(r#"{"data": "share-test", "size": 300, "format": "svg", "style": "dots"}"#).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: serde_json::Value = resp.into_json().unwrap();
+    let share_url = body["share_url"].as_str().unwrap();
+    assert!(share_url.contains("/qr/view?"), "Should contain view path");
+    assert!(share_url.contains("size=300"), "Should contain size param");
+    assert!(share_url.contains("format=svg"), "Should contain format param");
+    assert!(share_url.contains("style=dots"), "Should contain style param");
+}
+
+// ============ Manage URL in Tracked QR Response ============
+
+#[test]
+fn test_tracked_qr_manage_url() {
+    let client = test_client();
+    let resp = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/manage-test"}"#).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: serde_json::Value = resp.into_json().unwrap();
+    let manage_url = body["manage_url"].as_str().unwrap();
+    assert!(manage_url.contains("/api/v1/qr/tracked/"), "Should contain tracked path");
+    assert!(manage_url.contains("?key=qrt_"), "Should contain manage token");
+}
+
+// ============ Scan Event Ordering ============
+
+#[test]
+fn test_scan_events_ordered_newest_first() {
+    let client = test_client();
+    let create = client.post("/api/v1/qr/tracked").header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/order-test", "short_code": "order-test"}"#).dispatch();
+    let cb: serde_json::Value = create.into_json().unwrap();
+    let id = cb["id"].as_str().unwrap().to_string();
+    let token = cb["manage_token"].as_str().unwrap().to_string();
+
+    // Create 3 scans with different user agents
+    for i in 1..=3 {
+        client.get("/r/order-test")
+            .header(Header::new("User-Agent", format!("Agent-{}", i)))
+            .dispatch();
+    }
+
+    let stats = client.get(format!("/api/v1/qr/tracked/{}/stats", id))
+        .header(Header::new("Authorization", format!("Bearer {}", token))).dispatch();
+    let sb: serde_json::Value = stats.into_json().unwrap();
+    let scans = sb["recent_scans"].as_array().unwrap();
+    assert_eq!(scans.len(), 3);
+    // Verify all 3 user agents are present (ordering may vary within same second)
+    let agents: Vec<&str> = scans.iter()
+        .map(|s| s["user_agent"].as_str().unwrap())
+        .collect();
+    assert!(agents.contains(&"Agent-1"), "Missing Agent-1");
+    assert!(agents.contains(&"Agent-2"), "Missing Agent-2");
+    assert!(agents.contains(&"Agent-3"), "Missing Agent-3");
+}

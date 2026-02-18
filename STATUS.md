@@ -42,7 +42,7 @@ Stateless QR code generation/decoding service with tracked QR analytics, logo ov
 - **Discovery:** `/api/v1/openapi.json`, `/llms.txt` (130 lines, comprehensive)
 - **Docker:** Multi-stage build (frontend + backend), unified serving on single port
 - **CI/CD:** GitHub Actions → ghcr.io + Watchtower auto-deploy
-- **Tests:** 122 total (88 HTTP + 28 integration + 3 unit + 3 lib), zero clippy warnings
+- **Tests:** 171 total (137 HTTP + 28 integration + 3 unit + 3 lib), zero clippy warnings
 
 ### Tech Stack
 
@@ -81,7 +81,7 @@ Stateless QR code generation/decoding service with tracked QR analytics, logo ov
 - **Analytics dashboard enhancements** (2026-02-13) — Scan timeline, device breakdown, relative times.
 - **Full UI reevaluation** (2026-02-11) — CSS extraction, responsive design, toast system, animations.
 
-*Last updated: 2026-02-18 09:15 UTC. 122 Rust + 171 Python SDK = 293 tests, zero clippy warnings.*
+*Last updated: 2026-02-18 14:15 UTC. 171 Rust + 171 Python SDK = 342 tests, zero clippy warnings.*
 
 ## Incoming Directions (Work Queue)
 
