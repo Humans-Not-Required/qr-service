@@ -56,6 +56,7 @@ fn rocket() -> _ {
                 routes::create_tracked_qr,
                 routes::get_tracked_qr_stats,
                 routes::delete_tracked_qr,
+                routes::api_skills_skill_md,
             ],
         )
         .mount(
