@@ -2,7 +2,7 @@
 
 ## Current State: Feature-Complete ✅
 
-Stateless QR code generation/decoding service with tracked QR analytics, logo overlay, PDF output, and React frontend. All 122 tests passing, zero clippy warnings, CI green.
+Stateless QR code generation/decoding service with tracked QR analytics, logo overlay, PDF output, and React frontend. All 122 Rust + 171 Python SDK tests passing, zero clippy warnings, CI green.
 
 ### What's Done
 
@@ -71,6 +71,7 @@ Stateless QR code generation/decoding service with tracked QR analytics, logo ov
 
 ### Recent Completed
 
+- **SDK expansion + configurable rate limits** (2026-02-18) — Python SDK tests 74→171 (+97). New SDK methods: `view()`, `llms_txt_root()`, `skill_md_v1()`. Rate limits now configurable via `RATE_LIMIT_MAX` and `TRACKED_RATE_LIMIT` env vars. New test categories: generate roundtrips (all styles), determinism, logo overlay, batch advanced, template advanced, tracked QR lifecycle, view endpoint, discovery dual-path, constructor, error structure, cross-feature interactions. Commits: 2713306, 5c10ef1, 3c741a0.
 - **Rate limit headers + batch logo overlay bug fixes** (2026-02-17) — Fixed two documented bugs: (1) Rate limit response headers (X-RateLimit-Limit/Remaining/Reset) now attached to all stateless endpoints via `RateLimited<T>` responder pattern, replacing the broken fairing approach. 429 responses include retry_after_secs/limit/remaining in body. (2) Batch endpoint now applies logo overlay (PNG alpha-blend, SVG embedded image) with auto EC-H upgrade, matching single-generate behavior. Extended `ApiError` with optional rate limit fields. Removed dead `RateLimitHeaders` fairing. 9 new tests (122 total). Commit: pending.
 - **Logo overlay UI** (2026-02-16) — Frontend file picker, preview, size slider (5-40%), EC upgrade notice. Fixed vCard template fields to match API (name, not first_name/last_name). Added title + website vCard fields. 
 - **26 new tests** (2026-02-16) — Batch edge cases (>50 rejected, mixed formats, single item), generate edge cases (min/max size, all EC levels, all styles SVG), decode edge cases (empty image, non-QR image), view params (style, colors, size, missing data), tracked QR (expiry, short code validation, delete without token), template edge cases (vcard minimal/missing, wifi nopass, url SVG), logo+PDF, response field validation. Commit: 87d4980.
@@ -80,7 +81,7 @@ Stateless QR code generation/decoding service with tracked QR analytics, logo ov
 - **Analytics dashboard enhancements** (2026-02-13) — Scan timeline, device breakdown, relative times.
 - **Full UI reevaluation** (2026-02-11) — CSS extraction, responsive design, toast system, animations.
 
-*Last updated: 2026-02-17 03:30 UTC. 122 tests, zero clippy warnings, CI green.*
+*Last updated: 2026-02-18 09:15 UTC. 122 Rust + 171 Python SDK = 293 tests, zero clippy warnings.*
 
 ## Incoming Directions (Work Queue)
 

@@ -537,20 +537,25 @@ class QRService:
         format: Optional[str] = None,
         style: Optional[str] = None,
     ) -> bytes:
-        """``GET /api/v1/qr/view`` — stateless share URL (returns HTML page or image).
+        """``GET /qr/view`` — stateless share URL (returns QR image).
+
+        The ``data`` parameter is automatically base64-encoded as required by
+        the view endpoint.
 
         Args:
-            data: Content to encode.
+            data: Content to encode (plain text — will be base64-encoded).
             size: Image size.
-            fg: Foreground hex color.
-            bg: Background hex color.
-            format: Output format.
+            fg: Foreground hex color (without ``#``).
+            bg: Background hex color (without ``#``).
+            format: Output format (``"png"``, ``"svg"``).
             style: Module style.
 
         Returns:
-            Raw response bytes (HTML page).
+            Raw response bytes (PNG/SVG image).
         """
-        q: Dict[str, str] = {"data": data}
+        import base64 as b64mod
+        encoded = b64mod.b64encode(data.encode()).decode()
+        q: Dict[str, str] = {"data": encoded}
         if size is not None:
             q["size"] = str(size)
         if fg is not None:
