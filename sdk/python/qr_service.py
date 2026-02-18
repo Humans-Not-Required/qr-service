@@ -561,7 +561,7 @@ class QRService:
             q["format"] = format
         if style is not None:
             q["style"] = style
-        return self._request("GET", "/api/v1/qr/view", query=q)
+        return self._request("GET", "/qr/view", query=q)
 
     # ------------------------------------------------------------------
     # Discovery

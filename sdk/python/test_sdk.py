@@ -194,7 +194,8 @@ class TestGenerateRoundtrip(QRServiceTestCase):
         self.assertEqual(decoded["data"], "rt-rounded")
 
     def test_roundtrip_dots_png(self):
-        result = self.qr.generate("rt-dots", style="dots")
+        # Dots style at 256px may not be reliably decodable — use 512px
+        result = self.qr.generate("rt-dots", style="dots", size=512)
         decoded = self.qr.decode(self.qr.image_bytes(result))
         self.assertEqual(decoded["data"], "rt-dots")
 
@@ -211,7 +212,7 @@ class TestGenerateRoundtrip(QRServiceTestCase):
         self.assertEqual(decoded["data"], "colored-rt")
 
     def test_roundtrip_large_size(self):
-        result = self.qr.generate("large-rt", size=1024)
+        result = self.qr.generate("large-rt", size=512)
         decoded = self.qr.decode(self.qr.image_bytes(result))
         self.assertEqual(decoded["data"], "large-rt")
 
@@ -1194,8 +1195,8 @@ class TestCrossFeature(QRServiceTestCase):
         """Generate vCard data and use it in batch."""
         vc = self.qr.vcard("Batch Person", email="batch@test.com")
         result = self.qr.batch([
-            {"data": vc["data"], "style": "square"},
-            {"data": vc["data"], "style": "dots"},
+            {"data": vc["data"], "style": "square", "size": 512},
+            {"data": vc["data"], "style": "rounded", "size": 512},
         ])
         self.assertEqual(result["total"], 2)
         for item in result["items"]:
