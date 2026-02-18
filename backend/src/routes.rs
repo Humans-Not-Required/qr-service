@@ -17,8 +17,22 @@ use crate::rate_limit::{RateLimitResult, RateLimited, RateLimiter};
 
 static START_TIME: LazyLock<Instant> = LazyLock::new(Instant::now);
 
-// Default IP rate limit: 100 requests per window
-const IP_RATE_LIMIT: u64 = 100;
+/// General IP rate limit (requests per window). Configurable via RATE_LIMIT_MAX env var.
+static IP_RATE_LIMIT: LazyLock<u64> = LazyLock::new(|| {
+    std::env::var("RATE_LIMIT_MAX")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100)
+});
+
+/// Tracked QR creation rate limit (per IP, per window).
+/// Configurable via TRACKED_RATE_LIMIT env var.
+static TRACKED_CREATE_RATE_LIMIT: LazyLock<u64> = LazyLock::new(|| {
+    std::env::var("TRACKED_RATE_LIMIT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20)
+});
 
 /// Check IP rate limit and return the result for header attachment.
 /// On success, returns the `RateLimitResult` so callers can wrap their
@@ -29,7 +43,7 @@ fn check_ip_rate(
     limiter: &RateLimiter,
 ) -> Result<RateLimitResult, (Status, Json<ApiError>)> {
     let key = format!("ip:{}", ip.0);
-    let result = limiter.check(&key, IP_RATE_LIMIT);
+    let result = limiter.check(&key, *IP_RATE_LIMIT);
     if !result.allowed {
         return Err((
             Status::TooManyRequests,
@@ -531,9 +545,6 @@ pub fn view_qr(
 
 // ============ Tracked QR / Short URLs (Per-Resource Token Auth) ============
 
-/// Rate limit for tracked QR creation (per IP)
-const TRACKED_CREATE_RATE_LIMIT: u64 = 20;
-
 #[post("/qr/tracked", format = "json", data = "<req>")]
 pub fn create_tracked_qr(
     req: Json<CreateTrackedQrRequest>,
@@ -543,7 +554,7 @@ pub fn create_tracked_qr(
 ) -> Result<RateLimited<Json<TrackedQrResponse>>, (Status, Json<ApiError>)> {
     // IP-based rate limit for creation
     let key = format!("ip:tracked:{}", ip.0);
-    let rl_tracked = limiter.check(&key, TRACKED_CREATE_RATE_LIMIT);
+    let rl_tracked = limiter.check(&key, *TRACKED_CREATE_RATE_LIMIT);
     if !rl_tracked.allowed {
         return Err((Status::TooManyRequests, Json(ApiError {
             error: "Rate limit exceeded for tracked QR creation. Try again later.".to_string(),

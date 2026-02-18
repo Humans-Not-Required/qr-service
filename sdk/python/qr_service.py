@@ -527,9 +527,54 @@ class QRService:
     # Discovery
     # ------------------------------------------------------------------
 
+    def view(
+        self,
+        data: str,
+        *,
+        size: Optional[int] = None,
+        fg: Optional[str] = None,
+        bg: Optional[str] = None,
+        format: Optional[str] = None,
+        style: Optional[str] = None,
+    ) -> bytes:
+        """``GET /api/v1/qr/view`` — stateless share URL (returns HTML page or image).
+
+        Args:
+            data: Content to encode.
+            size: Image size.
+            fg: Foreground hex color.
+            bg: Background hex color.
+            format: Output format.
+            style: Module style.
+
+        Returns:
+            Raw response bytes (HTML page).
+        """
+        q: Dict[str, str] = {"data": data}
+        if size is not None:
+            q["size"] = str(size)
+        if fg is not None:
+            q["fg"] = fg
+        if bg is not None:
+            q["bg"] = bg
+        if format is not None:
+            q["format"] = format
+        if style is not None:
+            q["style"] = style
+        return self._request("GET", "/api/v1/qr/view", query=q)
+
+    # ------------------------------------------------------------------
+    # Discovery
+    # ------------------------------------------------------------------
+
     def llms_txt(self) -> str:
         """``GET /api/v1/llms.txt`` — AI-readable service documentation."""
         data = self._request("GET", "/api/v1/llms.txt")
+        return data.decode() if isinstance(data, bytes) else str(data)
+
+    def llms_txt_root(self) -> str:
+        """``GET /llms.txt`` — root-level AI-readable service documentation."""
+        data = self._request("GET", "/llms.txt")
         return data.decode() if isinstance(data, bytes) else str(data)
 
     def openapi(self) -> Dict[str, Any]:
@@ -543,6 +588,11 @@ class QRService:
     def skill_md(self) -> str:
         """``GET /.well-known/skills/qr-service/SKILL.md`` — agent integration guide."""
         data = self._request("GET", "/.well-known/skills/qr-service/SKILL.md")
+        return data.decode() if isinstance(data, bytes) else str(data)
+
+    def skill_md_v1(self) -> str:
+        """``GET /api/v1/skills/SKILL.md`` — alternate agent integration guide path."""
+        data = self._request("GET", "/api/v1/skills/SKILL.md")
         return data.decode() if isinstance(data, bytes) else str(data)
 
     # ------------------------------------------------------------------
