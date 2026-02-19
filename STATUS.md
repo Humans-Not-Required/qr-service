@@ -28,7 +28,7 @@ Stateless QR code generation/decoding service with tracked QR analytics, logo ov
   - Available in generate, batch, template, view, and tracked endpoints
 - **Tracked QR / Short URLs (per-resource manage_token):**
   - `POST /api/v1/qr/tracked` — Create tracked QR with short URL
-  - `GET /api/v1/qr/tracked/{id}/stats` — Scan analytics with recent events
+  - `GET /api/v1/qr/tracked/{id}/stats?since=<ts>&limit=<N>` — Scan analytics. `?since=` enables efficient incremental polling (returns only scans after timestamp). `?limit=` controls page size (1-500, default 100).
   - `DELETE /api/v1/qr/tracked/{id}` — Delete tracked QR
   - `GET /r/{code}` — Short URL redirect (records scans)
   - Custom or auto-generated short codes, optional expiry
@@ -81,7 +81,7 @@ Stateless QR code generation/decoding service with tracked QR analytics, logo ov
 - **Analytics dashboard enhancements** (2026-02-13) — Scan timeline, device breakdown, relative times.
 - **Full UI reevaluation** (2026-02-11) — CSS extraction, responsive design, toast system, animations.
 
-*Last updated: 2026-02-18 14:15 UTC. 171 Rust + 171 Python SDK = 342 tests, zero clippy warnings.*
+*Last updated: 2026-02-19 12:30 UTC. 175 Rust + 171 Python SDK = 346 tests, zero clippy warnings.*
 
 ## Incoming Directions (Work Queue)
 

@@ -2488,3 +2488,106 @@ fn test_scan_events_ordered_newest_first() {
     assert!(agents.contains(&"Agent-2"), "Missing Agent-2");
     assert!(agents.contains(&"Agent-3"), "Missing Agent-3");
 }
+
+// ============ Tracked QR Stats with ?since= Filter ============
+
+#[test]
+fn test_tracked_qr_stats_since_filter_returns_new_scans_only() {
+    let client = test_client();
+
+    let create_body: serde_json::Value = client.post("/api/v1/qr/tracked")
+        .header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/since-test", "short_code": "since-filter-1"}"#)
+        .dispatch().into_json().unwrap();
+    let id = create_body["id"].as_str().unwrap();
+    let token = create_body["manage_token"].as_str().unwrap();
+
+    // One scan
+    client.get("/r/since-filter-1").dispatch();
+
+    // Get stats without since — 1 scan visible
+    let stats: serde_json::Value = client.get(format!("/api/v1/qr/tracked/{}/stats", id))
+        .header(Header::new("Authorization", format!("Bearer {}", token)))
+        .dispatch().into_json().unwrap();
+    assert_eq!(stats["scan_count"], 1);
+    assert_eq!(stats["recent_scans"].as_array().unwrap().len(), 1);
+
+    // ?since= with a future timestamp excludes all existing scans
+    let stats_since: serde_json::Value = client.get(
+        format!("/api/v1/qr/tracked/{}/stats?since=2099-12-31T23:59:59Z", id))
+        .header(Header::new("Authorization", format!("Bearer {}", token)))
+        .dispatch().into_json().unwrap();
+    // scan_count always reflects total; recent_scans is filtered
+    assert_eq!(stats_since["scan_count"], 1);
+    assert_eq!(stats_since["recent_scans"].as_array().unwrap().len(), 0,
+        "Future since= should exclude all scans");
+}
+
+#[test]
+fn test_tracked_qr_stats_since_old_timestamp_returns_all() {
+    let client = test_client();
+
+    let create_body: serde_json::Value = client.post("/api/v1/qr/tracked")
+        .header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/since-old", "short_code": "since-filter-2"}"#)
+        .dispatch().into_json().unwrap();
+    let id = create_body["id"].as_str().unwrap();
+    let token = create_body["manage_token"].as_str().unwrap();
+
+    client.get("/r/since-filter-2").dispatch();
+    client.get("/r/since-filter-2").dispatch();
+
+    // ?since= with a very old timestamp should return all scans
+    let stats: serde_json::Value = client.get(
+        format!("/api/v1/qr/tracked/{}/stats?since=2000-01-01T00:00:00Z", id))
+        .header(Header::new("Authorization", format!("Bearer {}", token)))
+        .dispatch().into_json().unwrap();
+    assert_eq!(stats["recent_scans"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn test_tracked_qr_stats_since_future_timestamp_returns_none() {
+    let client = test_client();
+
+    let create_body: serde_json::Value = client.post("/api/v1/qr/tracked")
+        .header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/since-future", "short_code": "since-filter-3"}"#)
+        .dispatch().into_json().unwrap();
+    let id = create_body["id"].as_str().unwrap();
+    let token = create_body["manage_token"].as_str().unwrap();
+
+    client.get("/r/since-filter-3").dispatch();
+
+    // ?since= with a far-future timestamp returns no scans (but scan_count is still correct)
+    let stats: serde_json::Value = client.get(
+        format!("/api/v1/qr/tracked/{}/stats?since=2099-12-31T23:59:59Z", id))
+        .header(Header::new("Authorization", format!("Bearer {}", token)))
+        .dispatch().into_json().unwrap();
+    assert_eq!(stats["scan_count"], 1);
+    assert_eq!(stats["recent_scans"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn test_tracked_qr_stats_limit_param() {
+    let client = test_client();
+
+    let create_body: serde_json::Value = client.post("/api/v1/qr/tracked")
+        .header(ContentType::JSON)
+        .body(r#"{"target_url": "https://example.com/limit-test", "short_code": "limit-filter-1"}"#)
+        .dispatch().into_json().unwrap();
+    let id = create_body["id"].as_str().unwrap();
+    let token = create_body["manage_token"].as_str().unwrap();
+
+    // Create 5 scans
+    for _ in 0..5 {
+        client.get("/r/limit-filter-1").dispatch();
+    }
+
+    // ?limit=2 should return at most 2 recent scans
+    let stats: serde_json::Value = client.get(
+        format!("/api/v1/qr/tracked/{}/stats?limit=2", id))
+        .header(Header::new("Authorization", format!("Bearer {}", token)))
+        .dispatch().into_json().unwrap();
+    assert_eq!(stats["scan_count"], 5);
+    assert_eq!(stats["recent_scans"].as_array().unwrap().len(), 2);
+}

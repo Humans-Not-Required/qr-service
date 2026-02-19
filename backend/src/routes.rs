@@ -693,14 +693,28 @@ pub fn create_tracked_qr(
     })
 }
 
-#[get("/qr/tracked/<id>/stats")]
+/// GET /api/v1/qr/tracked/:id/stats — analytics for a tracked QR code.
+///
+/// Supports `?since=<ISO-8601 timestamp>` to return only scans after a given point,
+/// enabling efficient incremental polling without re-processing old scans.
+///
+/// Supports `?limit=<N>` (1-500, default 100) to control how many recent scans to return.
+///
+/// Example polling loop:
+///   1. `GET /stats` → note last `scanned_at` in response
+///   2. `GET /stats?since=<last_scanned_at>` → get only new scans
+///   3. Repeat on your preferred interval
+#[get("/qr/tracked/<id>/stats?<since>&<limit>")]
 pub fn get_tracked_qr_stats(
     id: &str,
     token: ManageToken,
     db: &State<DbPool>,
+    since: Option<&str>,
+    limit: Option<i64>,
 ) -> Result<Json<TrackedQrStatsResponse>, (Status, Json<ApiError>)> {
     let conn = db.conn();
     let token_hash = hash_token(&token.0);
+    let scan_limit = limit.unwrap_or(100).clamp(1, 500);
 
     let tracked = conn.query_row(
         "SELECT id, short_code, target_url, scan_count, expires_at, created_at 
@@ -712,17 +726,32 @@ pub fn get_tracked_qr_stats(
         (Status::NotFound, Json(ApiError::new(404, "NOT_FOUND", "Tracked QR code not found or invalid token")))
     })?;
 
-    let mut stmt = conn.prepare(
-        "SELECT id, scanned_at, user_agent, referrer FROM scan_events WHERE tracked_qr_id = ?1 ORDER BY scanned_at DESC LIMIT 100",
-    ).map_err(|_e| {
-        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", "Internal server error")))
-    })?;
-
-    let recent_scans = stmt.query_map(rusqlite::params![id], |row| {
-        Ok(ScanEventResponse { id: row.get(0)?, scanned_at: row.get(1)?, user_agent: row.get(2)?, referrer: row.get(3)? })
-    }).map_err(|_e| {
-        (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", "Internal server error")))
-    })?.filter_map(|r| r.ok()).collect();
+    // Build scan query with optional since filter using SQL sentinel approach.
+    // Pass since_ts as "0001-01-01" when not provided — all real timestamps are later.
+    let since_ts = since
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "0001-01-01".to_string());
+    let scan_sql = format!(
+        "SELECT id, scanned_at, user_agent, referrer FROM scan_events \
+         WHERE tracked_qr_id = ?1 AND scanned_at > ?2 \
+         ORDER BY scanned_at DESC LIMIT {}",
+        scan_limit
+    );
+    let mut scan_stmt = conn.prepare(&scan_sql)
+        .map_err(|_| (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", "Internal server error"))))?;
+    let recent_scans: Vec<ScanEventResponse> = scan_stmt
+        .query_map(rusqlite::params![id, since_ts], |row| {
+            Ok(ScanEventResponse {
+                id: row.get(0)?,
+                scanned_at: row.get(1)?,
+                user_agent: row.get(2)?,
+                referrer: row.get(3)?,
+            })
+        })
+        .map_err(|_| (Status::InternalServerError, Json(ApiError::new(500, "DB_ERROR", "Internal server error"))))?
+        .filter_map(|r| r.ok())
+        .collect();
 
     Ok(Json(TrackedQrStatsResponse {
         id: tracked.0, short_code: tracked.1, target_url: tracked.2,

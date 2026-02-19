@@ -111,9 +111,18 @@ Response:
 Get scan statistics for a tracked QR code.
 
 Auth: manage_token required
+Query params:
+  ?since=<ISO-8601 timestamp> — return only scans after this point (efficient polling).
+      Use scanned_at from the most recent scan as cursor on next call.
+  ?limit=<N> — max scans to return (1-500, default 100)
 Response:
   id, short_code, target_url, scan_count, expires_at, created_at
   recent_scans: [{id, scanned_at, user_agent, referrer}, ...]
+
+Polling pattern:
+  1. GET /stats → note last scanned_at
+  2. GET /stats?since=<last_scanned_at> → only new scans
+  3. Repeat on interval
 
 ### DELETE /qr/tracked/{id} — Delete Tracked QR
 Remove a tracked QR code and all scan data.
