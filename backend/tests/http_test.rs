@@ -41,6 +41,8 @@ fn test_client() -> Client {
             routes![
                 qr_service::routes::redirect_short_url,
                 qr_service::routes::view_qr,
+                qr_service::routes::skill_md,
+                qr_service::routes::root_llms_txt,
                 qr_service::routes::skills_index,
                 qr_service::routes::skills_skill_md,
             ],
@@ -1351,12 +1353,21 @@ fn test_skills_skill_md() {
     let resp = client.get("/.well-known/skills/qr-service/SKILL.md").dispatch();
     assert_eq!(resp.status(), Status::Ok);
     let body = resp.into_string().unwrap();
-    assert!(body.starts_with("---"), "Missing YAML frontmatter");
-    assert!(body.contains("name: qr-service"), "Missing skill name");
+    assert!(body.contains("# QR Service"), "Missing title");
     assert!(body.contains("## Quick Start"), "Missing Quick Start");
-    assert!(body.contains("## Auth Model"), "Missing Auth Model");
-    assert!(body.contains("Logo Overlay"), "Missing logo overlay section");
-    assert!(body.contains("Templates"), "Missing templates section");
+    assert!(body.contains("## Auth"), "Missing Auth section");
+}
+
+#[test]
+fn test_skill_md_root() {
+    let client = test_client();
+    let skill_resp = client.get("/SKILL.md").dispatch();
+    assert_eq!(skill_resp.status(), Status::Ok);
+    let skill_body = skill_resp.into_string().unwrap();
+    assert!(skill_body.contains("# QR Service"));
+    let llms_resp = client.get("/llms.txt").dispatch();
+    let llms_body = llms_resp.into_string().unwrap();
+    assert_eq!(skill_body, llms_body, "llms.txt should alias SKILL.md");
 }
 
 // ============ Rate Limit Response Headers ============
@@ -1640,6 +1651,7 @@ fn test_client_full() -> Client {
             routes![
                 qr_service::routes::redirect_short_url,
                 qr_service::routes::view_qr,
+                qr_service::routes::skill_md,
                 qr_service::routes::root_llms_txt,
                 qr_service::routes::skills_index,
                 qr_service::routes::skills_skill_md,

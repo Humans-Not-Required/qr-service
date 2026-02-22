@@ -64,6 +64,7 @@ fn rocket() -> _ {
             routes![
                 routes::redirect_short_url,
                 routes::view_qr,
+                routes::skill_md,
                 routes::root_llms_txt,
                 routes::skills_index,
                 routes::skills_skill_md,

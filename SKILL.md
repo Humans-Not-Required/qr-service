@@ -140,8 +140,15 @@ Response: {"status": "ok", "version": "0.1.0"}
 ### GET /openapi.json — OpenAPI 3.0 Specification
 Full machine-readable API spec.
 
-### GET /llms.txt — This Document
-AI-readable API summary.
+### Service Discovery
+
+```
+GET /api/v1/health                               — { status, version }
+GET /api/v1/openapi.json                         — OpenAPI spec
+GET /SKILL.md                                    — this file
+GET /llms.txt                                    — alias for SKILL.md
+GET /.well-known/skills/index.json               — machine-readable skill registry
+```
 
 ## Error Responses
 All errors return JSON:
@@ -154,6 +161,3 @@ BATCH_TOO_LARGE, INVALID_TEMPLATE, RATE_LIMITED, NOT_FOUND, UNAUTHORIZED, DECODE
 ## Source
 https://github.com/Humans-Not-Required/qr-service
 
-## Agent Skills Discovery
-- GET /.well-known/skills/index.json — skills discovery index (Cloudflare RFC)
-- GET /.well-known/skills/qr-service/SKILL.md — integration skill (agentskills.io format)

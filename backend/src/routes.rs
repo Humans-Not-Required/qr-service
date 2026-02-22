@@ -93,15 +93,21 @@ pub fn openapi() -> (ContentType, &'static str) {
     (ContentType::JSON, include_str!("../openapi.json"))
 }
 
+/// GET /SKILL.md — canonical AI-readable service guide
+#[get("/SKILL.md")]
+pub fn skill_md() -> (ContentType, &'static str) {
+    (ContentType::Plain, include_str!("../SKILL.md"))
+}
+
 #[get("/llms.txt")]
 pub fn llms_txt() -> (ContentType, &'static str) {
-    (ContentType::Text, include_str!("../llms.txt"))
+    (ContentType::Plain, include_str!("../SKILL.md"))
 }
 
 /// Root-level /llms.txt for standard discovery (outside /api/v1)
 #[get("/llms.txt", rank = 2)]
 pub fn root_llms_txt() -> (ContentType, &'static str) {
-    (ContentType::Text, include_str!("../llms.txt"))
+    (ContentType::Plain, include_str!("../SKILL.md"))
 }
 
 // ============ QR Generation (Stateless, No Auth) ============
@@ -845,13 +851,13 @@ pub fn skills_index() -> (ContentType, &'static str) {
 
 #[get("/.well-known/skills/qr-service/SKILL.md")]
 pub fn skills_skill_md() -> (ContentType, &'static str) {
-    (ContentType::Markdown, SKILL_MD)
+    (ContentType::Plain, include_str!("../SKILL.md"))
 }
 
 /// GET /skills/SKILL.md — alternate path for agent discoverability
 #[get("/skills/SKILL.md")]
 pub fn api_skills_skill_md() -> (ContentType, &'static str) {
-    (ContentType::Markdown, SKILL_MD)
+    (ContentType::Plain, include_str!("../SKILL.md"))
 }
 
 const SKILLS_INDEX_JSON: &str = r#"{
@@ -859,6 +865,7 @@ const SKILLS_INDEX_JSON: &str = r#"{
     {
       "name": "qr-service",
       "description": "Generate, decode, and track QR codes via a REST API. Supports PNG/SVG/PDF output, templates (WiFi, vCard, URL), logo overlay, batch generation, and tracked QR codes with analytics.",
+      "url": "/SKILL.md",
       "files": [
         "SKILL.md"
       ]
@@ -866,112 +873,7 @@ const SKILLS_INDEX_JSON: &str = r#"{
   ]
 }"#;
 
-const SKILL_MD: &str = r##"---
-name: qr-service
-description: Generate, decode, and track QR codes via a REST API. Supports PNG/SVG/PDF output, templates (WiFi, vCard, URL), logo overlay, batch generation, and tracked QR codes with analytics.
----
-
-# QR Service Integration
-
-A comprehensive QR code API for AI agents. Generate QR codes in multiple formats, use templates for common patterns, add logo overlays, track scans with analytics, and decode existing QR images.
-
-## Quick Start
-
-1. **Generate a QR code:**
-   ```
-   POST /api/v1/qr/generate
-   {"data": "https://example.com", "format": "png", "size": 300}
-   ```
-   Returns base64-encoded image in the response.
-
-2. **Use a template:**
-   ```
-   POST /api/v1/qr/template
-   {"template_type": "wifi", "params": {"ssid": "MyNetwork", "password": "secret", "encryption": "WPA"}}
-   ```
-
-3. **Decode a QR code:**
-   ```
-   POST /api/v1/qr/decode
-   {"image": "<base64-encoded-png>"}
-   ```
-
-## Core Patterns
-
-### Generation Options
-```json
-{
-  "data": "content to encode",
-  "format": "png|svg|pdf",
-  "size": 100-2000,
-  "error_correction": "L|M|Q|H",
-  "style": "square|rounded|circle",
-  "foreground": "#000000",
-  "background": "#FFFFFF",
-  "logo": "<base64-or-data-uri>",
-  "logo_size": 5-40
-}
-```
-
-### Logo Overlay
-Add a logo to the center of QR codes. Auto-upgrades error correction to H:
-```json
-{"data": "...", "logo": "<base64-image>", "logo_size": 20}
-```
-Max logo size: 512KB. Supported formats: PNG, JPEG, GIF, WebP.
-
-### Templates
-- **wifi**: `{"ssid": "...", "password": "...", "encryption": "WPA|WEP|nopass"}`
-- **vcard**: `{"name": "...", "phone": "...", "email": "...", "title": "...", "website": "..."}`
-- **url**: `{"url": "https://..."}`
-
-### Batch Generation
-```
-POST /api/v1/qr/batch
-{"items": [{"data": "item1"}, {"data": "item2", "format": "svg"}]}
-```
-Max 50 items per batch.
-
-### Tracked QR Codes (Auth Required)
-```
-POST /api/v1/qr/tracked
-Authorization: Bearer <manage_key>
-{"data": "https://example.com", "name": "Campaign Q1"}
-```
-Returns a short code URL. Each scan is logged with timestamp, user agent, and referrer.
-
-### View Endpoint
-```
-GET /api/v1/qr/view?data=Hello&format=svg&style=rounded
-```
-Direct image response (not JSON). Useful for embedding in HTML.
-
-## Auth Model
-
-- **Stateless endpoints** (generate, decode, batch, template, view): No auth required
-- **Tracked QR codes**: `Authorization: Bearer <manage_key>` required for create/delete/analytics
-- Manage key auto-generated on first run
-
-## Output Formats
-
-| Format | Content | Notes |
-|--------|---------|-------|
-| png | Base64 raster image | Default, 100-2000px |
-| svg | XML vector image | Scalable, smallest file size |
-| pdf | Vector PDF document | Print-ready |
-
-## Gotchas
-
-- Size is clamped to 100-2000 pixels
-- Logo overlay not applied in batch endpoint
-- Error correction auto-upgrades to H when logo is present
-- PDF uses vector shapes (not raster) — modules are drawn as geometric primitives
-- vCard template uses a single `name` field (not separate first/last)
-
-## Full API Reference
-
-See `/api/v1/llms.txt` for complete endpoint documentation and `/api/v1/openapi.json` for the OpenAPI specification.
-"##;
+// SKILL_MD constant removed — now served via include_str!("../SKILL.md")
 
 // ============ SPA Fallback ============
 
