@@ -1,17 +1,33 @@
 # Rust
-target/
-*.db
+/target/
+**/*.rs.bk
+*.pdb
 
-# Frontend
+# Node
 node_modules/
 dist/
+
+# Python
+__pycache__/
+*.pyc
+sdk/python/__pycache__/
+
+# SQLite
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Environment
 .env
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
-sdk/python/__pycache__/
